@@ -1,0 +1,96 @@
+{
+  "version": 4,
+  "targets": {
+    "net48": {
+      "ScriptHookVDotNet3/3.6.0": {
+        "type": "package",
+        "compile": {
+          "lib/net48/ScriptHookVDotNet3.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net48/_._": {
+            "related": ".xml"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "ScriptHookVDotNet3/3.6.0": {
+      "sha512": "YccOvaMnHtFsWuGaZoi2Q/HFj8yyjNBN3b18pvcYYF4JcbjZxR1+I319qaMxRsvW1+iCbBZareQaeq6OpUHotw==",
+      "type": "package",
+      "path": "scripthookvdotnet3/3.6.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net48/ScriptHookVDotNet3.dll",
+        "lib/net48/ScriptHookVDotNet3.xml",
+        "scripthookvdotnet3.3.6.0.nupkg.sha512",
+        "scripthookvdotnet3.nuspec"
+      ]
+    }
+  },
+  "projectFileDependencyGroups": {
+    "net48": [
+      "ScriptHookVDotNet3 >= 3.6.0"
+    ]
+  },
+  "packageFolders": {
+    "C:\\Users\\morri\\.nuget\\packages\\": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "C:\\Users\\morri\\rand_git\\flock_gta\\FlockSurveillance.csproj",
+      "projectName": "FlockSurveillance",
+      "projectPath": "C:\\Users\\morri\\rand_git\\flock_gta\\FlockSurveillance.csproj",
+      "packagesPath": "C:\\Users\\morri\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\morri\\rand_git\\flock_gta\\obj\\",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "C:\\Users\\morri\\AppData\\Roaming\\NuGet\\NuGet.Config"
+      ],
+      "originalTargetFrameworks": [
+        "net48"
+      ],
+      "sources": {
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net48": {
+          "framework": "net48",
+          "targetAlias": "net48",
+          "projectReferences": {}
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      },
+      "SdkAnalysisLevel": "10.0.400"
+    },
+    "frameworks": {
+      "net48": {
+        "framework": "net48",
+        "targetAlias": "net48",
+        "dependencies": {
+          "ScriptHookVDotNet3": {
+            "include": "Compile, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+            "suppressParent": "All",
+            "target": "Package",
+            "version": "[3.6.0, )"
+          }
+        },
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.400\\RuntimeIdentifierGraph.json"
+      }
+    }
+  }
+}

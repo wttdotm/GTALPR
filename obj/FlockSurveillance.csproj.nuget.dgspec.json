@@ -1,0 +1,61 @@
+{
+  "format": 1,
+  "restore": {
+    "C:\\Users\\morri\\rand_git\\flock_gta\\FlockSurveillance.csproj": {}
+  },
+  "projects": {
+    "C:\\Users\\morri\\rand_git\\flock_gta\\FlockSurveillance.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "C:\\Users\\morri\\rand_git\\flock_gta\\FlockSurveillance.csproj",
+        "projectName": "FlockSurveillance",
+        "projectPath": "C:\\Users\\morri\\rand_git\\flock_gta\\FlockSurveillance.csproj",
+        "packagesPath": "C:\\Users\\morri\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\morri\\rand_git\\flock_gta\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\morri\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net48"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net48": {
+            "framework": "net48",
+            "targetAlias": "net48",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.400"
+      },
+      "frameworks": {
+        "net48": {
+          "framework": "net48",
+          "targetAlias": "net48",
+          "dependencies": {
+            "ScriptHookVDotNet3": {
+              "include": "Compile, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.6.0, )"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.400\\RuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

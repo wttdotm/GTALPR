@@ -1,0 +1,9 @@
+C:\Users\morri\rand_git\flock_gta\bin\Debug\net48\FlockSurveillance.dll
+C:\Users\morri\rand_git\flock_gta\bin\Debug\net48\FlockSurveillance.pdb
+C:\Users\morri\rand_git\flock_gta\obj\Debug\net48\FlockSurveillance.csproj.AssemblyReference.cache
+C:\Users\morri\rand_git\flock_gta\obj\Debug\net48\FlockSurveillance.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\morri\rand_git\flock_gta\obj\Debug\net48\FlockSurveillance.AssemblyInfoInputs.cache
+C:\Users\morri\rand_git\flock_gta\obj\Debug\net48\FlockSurveillance.AssemblyInfo.cs
+C:\Users\morri\rand_git\flock_gta\obj\Debug\net48\FlockSurveillance.csproj.CoreCompileInputs.cache
+C:\Users\morri\rand_git\flock_gta\obj\Debug\net48\FlockSurveillance.dll
+C:\Users\morri\rand_git\flock_gta\obj\Debug\net48\FlockSurveillance.pdb
