@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="System.Web.Extensions" />
     <PackageReference Include="ScriptHookVDotNet3" Version="3.6.0">
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>

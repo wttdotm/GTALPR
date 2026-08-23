@@ -5,6 +5,10 @@ using GTA;
 using GTA.Math;
 using GTA.Native;
 
+using System.Collections.Generic;
+using System.IO;
+using System.Web.Script.Serialization;
+
 
 ///TODO: make minimap FOV better
 /// 
@@ -14,8 +18,19 @@ namespace FlockSurveillance
     public sealed class SurveillanceScript : Script
     {
         //Camera setup stuff
+        private bool _initialCameraLoadAttempted;
+        private List<CameraDefinition> _cameraDefinitions =
+            new List<CameraDefinition>();
+
+        private readonly Dictionary<long, ActiveCamera> _activeCameras =
+            new Dictionary<long, ActiveCamera>();
+
+        private const float CameraActivationDistanceMeters = 150f;
+        private int _nextCameraStreamingCheck;
+
+
         private const float CameraFovDegrees = 120f;
-        private const float CameraRangeMeters = 22.86f;
+        private const float CameraRangeMeters = 44.86f;
         private const int FovSegments = 24;
         private const float PlacementDistanceMeters = 0.6096f;
         //eventually this will be flock cameras
@@ -52,6 +67,15 @@ namespace FlockSurveillance
         }
         private void OnTick(object sender, EventArgs e)
         {
+
+            if (!_initialCameraLoadAttempted)
+            {
+                _initialCameraLoadAttempted = true;
+                LoadCameraDefinitionsFromJson();
+            }
+            UpdateNearbyCameras();
+            DrawNearbyCameraFieldsOfView();
+
             if (!_cameraPlaced)
             {
                 return;
@@ -118,7 +142,7 @@ namespace FlockSurveillance
             Ped player = Game.Player.Character;
 
             Vector3 cameraEyePosition =
-                _cameraPosition + new Vector3(0f, 0f, 1.5f);
+                _cameraPosition + new Vector3(0f, 0f, CameraEyeHeightMeters);
 
             Vector3 playerTargetPosition =
                 player.Position + new Vector3(0f, 0f, 1.0f);
@@ -214,6 +238,16 @@ namespace FlockSurveillance
 
         private void OnKeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyCode == Keys.F12)
+            {
+                ShowNearestActiveCameraDebug();
+                return;
+            }
+            if (e.KeyCode == Keys.F11)
+            {
+                ShowCurrentCameraCoordinates();
+                return;
+            }
             if (e.KeyCode == Keys.F7)
             {
                 ForceHiddenEvasion();
@@ -315,36 +349,66 @@ namespace FlockSurveillance
 
         private void DrawFieldOfView(Color color)
         {
+            DrawFieldOfView(
+                _cameraPosition,
+                _cameraHeading,
+                color
+            );
+        }
+
+        private void DrawFieldOfView(
+            Vector3 cameraPosition,
+            float cameraHeading,
+            Color color
+        )
+        {
             Vector3 origin =
-                _cameraPosition + new Vector3(0f, 0f, 1.5f);
+                cameraPosition +
+                new Vector3(0f, 0f, CameraEyeHeightMeters);
 
-            Vector3 forward = HeadingToDirection(_cameraHeading);
+            Vector3 forward =
+                HeadingToDirection(cameraHeading);
+
             float halfFov = CameraFovDegrees / 2f;
-
             Vector3 previousPoint = Vector3.Zero;
 
             for (int i = 0; i <= FovSegments; i++)
             {
                 float fraction = (float)i / FovSegments;
-                float angle = -halfFov + (CameraFovDegrees * fraction);
 
-                Vector3 direction = RotateAroundZ(forward, angle);
-                Vector3 endpoint = origin + (direction * CameraRangeMeters);
+                float angle =
+                    -halfFov +
+                    (CameraFovDegrees * fraction);
 
-                // Radial lines create the translucent fan effect.
+                Vector3 direction =
+                    RotateAroundZ(forward, angle);
+
+                Vector3 endpoint =
+                    origin +
+                    (direction * CameraRangeMeters);
+
                 DrawLine(
                     origin,
                     endpoint,
-                    Color.FromArgb(45, color.R, color.G, color.B)
+                    Color.FromArgb(
+                        45,
+                        color.R,
+                        color.G,
+                        color.B
+                    )
                 );
 
-                // Connect endpoints to draw the outer arc.
                 if (i > 0)
                 {
                     DrawLine(
                         previousPoint,
                         endpoint,
-                        Color.FromArgb(180, color.R, color.G, color.B)
+                        Color.FromArgb(
+                            180,
+                            color.R,
+                            color.G,
+                            color.B
+                        )
                     );
                 }
 
@@ -464,6 +528,7 @@ namespace FlockSurveillance
         {
             DeleteCameraBlip();
             DeleteCameraProp();
+            DeleteActiveCameras();
         }
         
         
@@ -588,6 +653,532 @@ namespace FlockSurveillance
 
             GTA.UI.Notification.Show(
                 "~r~Flock Camera Sighting Reported!"
+            );
+        }
+
+
+        //Camera palcemnt stuff
+        private void ShowCurrentCameraCoordinates()
+        {
+            if (!_cameraPlaced)
+            {
+                GTA.UI.Notification.Show("~y~No camera placed");
+                return;
+            }
+
+            GTA.UI.Notification.Show(
+                $"X: {_cameraPosition.X:0.000} | " +
+                $"Y: {_cameraPosition.Y:0.000} | " +
+                $"Z: {_cameraPosition.Z:0.000} | " +
+                $"Heading: {_cameraHeading:0.000}"
+            );
+        }
+
+        //loader
+        private void LoadCameraDefinitionsFromJson()
+        {
+            try
+            {
+                string cameraPath = Path.Combine(
+                    "scripts",
+                    "in_game_cameras.json"
+                );
+
+                if (!File.Exists(cameraPath))
+                {
+                    GTA.UI.Notification.Show(
+                        "~r~in_game_cameras.json was not found"
+                    );
+                    return;
+                }
+
+                string json = File.ReadAllText(cameraPath);
+
+                JavaScriptSerializer serializer =
+                    new JavaScriptSerializer();
+
+                _cameraDefinitions =
+                    serializer.Deserialize<List<CameraDefinition>>(json);
+
+                if (_cameraDefinitions == null)
+                {
+                    _cameraDefinitions =
+                        new List<CameraDefinition>();
+                }
+
+
+                GTA.UI.Notification.Show(
+                    $"~g~Loaded {_cameraDefinitions.Count} camera definitions"
+                );
+            }
+            catch (Exception exception)
+            {
+                _cameraDefinitions.Clear();
+
+                GTA.UI.Notification.Show(
+                    $"~r~Camera JSON error: {exception.Message}"
+                );
+            }
+        }
+
+        
+        private void UpdateNearbyCameras()
+        {
+            if (Game.GameTime < _nextCameraStreamingCheck)
+            {
+                return;
+            }
+
+            _nextCameraStreamingCheck = Game.GameTime + 1000;
+
+            Vector3 playerPosition =
+                Game.Player.Character.Position;
+
+            float activationDistanceSquared =
+                CameraActivationDistanceMeters *
+                CameraActivationDistanceMeters;
+
+            Model model = new Model(CameraPropModel);
+
+            foreach (CameraDefinition definition in _cameraDefinitions)
+            {
+                float offsetX = definition.X - playerPosition.X;
+                float offsetY = definition.Y - playerPosition.Y;
+
+                float distanceSquared =
+                    (offsetX * offsetX) +
+                    (offsetY * offsetY);
+
+                bool shouldBeActive =
+                    distanceSquared <= activationDistanceSquared;
+
+                ActiveCamera activeCamera;
+
+                if (
+                    shouldBeActive &&
+                    !_activeCameras.ContainsKey(definition.osmId)
+                )
+                {
+                    if (!model.IsValid || !model.IsInCdImage)
+                    {
+                        continue;
+                    }
+
+                    if (!model.IsLoaded && !model.Request(1000))
+                    {
+                        continue;
+                    }
+
+                    Function.Call(
+                        Hash.REQUEST_ADDITIONAL_COLLISION_AT_COORD,
+                        definition.X,
+                        definition.Y,
+                        playerPosition.Z
+                    );
+
+                    float groundZ;
+
+                    using (OutputArgument groundZOutput = new OutputArgument())
+                    {
+                        bool foundGround = Function.Call<bool>(
+                            Hash.GET_GROUND_Z_FOR_3D_COORD,
+                            definition.X,
+                            definition.Y,
+                            playerPosition.Z + 100f,
+                            groundZOutput,
+                            false,
+                            false
+                        );
+
+                        if (!foundGround)
+                        {
+                            // Terrain is not ready. The one-second update
+                            // loop will try this camera again.
+                            continue;
+                        }
+
+                        groundZ = groundZOutput.GetResult<float>();
+
+                        if (
+                            groundZ < 1f &&
+                            playerPosition.Z > 5f
+                        )
+                        {
+                            continue;
+                        }
+                    }
+
+                    Vector3 spawnPosition = new Vector3(
+                        definition.X,
+                        definition.Y,
+                        groundZ
+                    );
+
+                    Prop cameraProp = World.CreateProp(
+                        model,
+                        spawnPosition,
+                        false,
+                        true
+                    );
+
+                    if (cameraProp == null || !cameraProp.Exists())
+                    {
+                        continue;
+                    }
+
+                    cameraProp.Heading =
+                        (
+                            definition.Heading +
+                            CameraPropHeadingOffsetDegrees +
+                            360f
+                        ) % 360f;
+
+                    cameraProp.IsPositionFrozen = true;
+                    cameraProp.IsCollisionEnabled = true;
+
+                    activeCamera = new ActiveCamera
+                    {
+                        Definition = definition,
+                        Position = cameraProp.Position,
+                        Prop = cameraProp
+                    };
+
+                    CreateActiveCameraBlips(activeCamera);
+
+                    _activeCameras.Add(
+                        definition.osmId,
+                        activeCamera
+                    );
+                }
+                else if (
+                    !shouldBeActive &&
+                    _activeCameras.TryGetValue(
+                        definition.osmId,
+                        out activeCamera
+                    )
+                )
+                {
+                    DeleteActiveCamera(activeCamera);
+                    _activeCameras.Remove(definition.osmId);
+                }
+            }
+
+            model.MarkAsNoLongerNeeded();
+        }
+
+        private void CreateActiveCameraBlips(
+            ActiveCamera camera
+        )
+        {
+            Vector3 forward =
+                HeadingToDirection(camera.Definition.Heading);
+
+            Vector3 coneCenter =
+                camera.Position +
+                (forward * (CameraRangeMeters + 4.5f / 2f));
+
+            camera.ConeBlip = World.CreateBlip(coneCenter);
+            camera.ConeBlip.Sprite = BlipSprite.Parachute2;
+            camera.ConeBlip.Color = BlipColor.Red;
+            camera.ConeBlip.Alpha = 70;
+            camera.ConeBlip.ScaleX = 4.5f;
+            camera.ConeBlip.ScaleY = 3.0f;
+            camera.ConeBlip.RotationFloat =
+                camera.Definition.Heading;
+            camera.ConeBlip.IsHiddenOnLegend = true;
+            camera.ConeBlip.DisplayType =
+                BlipDisplayType.MiniMapOnly;
+
+            camera.CameraBlip = camera.Prop.AddBlip();
+            camera.CameraBlip.Sprite = BlipSprite.CCTV;
+            camera.CameraBlip.Color = BlipColor.Red;
+            camera.CameraBlip.Scale = 1.65f;
+            camera.CameraBlip.Name = "Flock Camera";
+            camera.CameraBlip.IsShortRange = false;
+            camera.CameraBlip.Rotation =
+                ((int)camera.Definition.Heading + 180) % 360;
+        }
+
+        private void DrawNearbyCameraFieldsOfView()
+        {
+            Vehicle playerVehicle =
+                Game.Player.Character.CurrentVehicle;
+
+            bool playerIsInVehicle =
+                playerVehicle != null &&
+                playerVehicle.Exists();
+
+            bool sightingReportedThisTick = false;
+
+            foreach (ActiveCamera camera in _activeCameras.Values)
+            {
+                bool vehicleInsideFov =
+                    playerIsInVehicle &&
+                    IsVehicleInsideFieldOfView(
+                        camera,
+                        playerVehicle
+                    );
+
+                bool hasLineOfSight =
+                    vehicleInsideFov &&
+                    HasLineOfSightToVehicle(
+                        camera,
+                        playerVehicle
+                    );
+
+                Color displayColor;
+
+                if (!vehicleInsideFov)
+                {
+                    displayColor = Color.Red;
+                }
+                else if (!hasLineOfSight)
+                {
+                    displayColor = Color.Yellow;
+                }
+                else
+                {
+                    displayColor = Color.Lime;
+                }
+
+                DrawFieldOfView(
+                    camera.Position,
+                    camera.Definition.Heading,
+                    displayColor
+                );
+
+                if (vehicleInsideFov)
+                {
+                    Vector3 cameraEyePosition =
+                        camera.Position +
+                        new Vector3(
+                            0f,
+                            0f,
+                            CameraEyeHeightMeters
+                        );
+
+                    Vector3 vehicleTargetPosition =
+                        playerVehicle.Position +
+                        new Vector3(0f, 0f, 0.5f);
+
+                    DrawLine(
+                        cameraEyePosition,
+                        vehicleTargetPosition,
+                        displayColor
+                    );
+                }
+
+                bool reportableSighting =
+                    playerIsInVehicle &&
+                    vehicleInsideFov &&
+                    hasLineOfSight &&
+                    Game.Player.WantedLevel > 0;
+
+                if (
+                    reportableSighting &&
+                    !camera.WasReportableSighting &&
+                    !sightingReportedThisTick
+                )
+                {
+                    ReportFlockCameraSighting();
+                    sightingReportedThisTick = true;
+                }
+
+                camera.WasReportableSighting =
+                    reportableSighting;
+            }
+        }
+
+        private bool IsVehicleInsideFieldOfView(
+            ActiveCamera camera,
+            Vehicle vehicle
+        )
+        {
+            float offsetX =
+                vehicle.Position.X -
+                camera.Position.X;
+
+            float offsetY =
+                vehicle.Position.Y -
+                camera.Position.Y;
+
+            float distanceSquared =
+                (offsetX * offsetX) +
+                (offsetY * offsetY);
+
+            float rangeSquared =
+                CameraRangeMeters *
+                CameraRangeMeters;
+
+            if (distanceSquared > rangeSquared)
+            {
+                return false;
+            }
+
+            if (distanceSquared < 0.0001f)
+            {
+                return true;
+            }
+
+            float distance =
+                (float)Math.Sqrt(distanceSquared);
+
+            float directionToVehicleX =
+                offsetX / distance;
+
+            float directionToVehicleY =
+                offsetY / distance;
+
+            Vector3 cameraForward =
+                HeadingToDirection(
+                    camera.Definition.Heading
+                );
+
+            float dotProduct =
+                (cameraForward.X * directionToVehicleX) +
+                (cameraForward.Y * directionToVehicleY);
+
+            float halfFovRadians =
+                (CameraFovDegrees / 2f) *
+                ((float)Math.PI / 180f);
+
+            float minimumVisibleDot =
+                (float)Math.Cos(halfFovRadians);
+
+            return dotProduct >= minimumVisibleDot;
+        }
+
+        private bool HasLineOfSightToVehicle(
+            ActiveCamera camera,
+            Vehicle vehicle
+        )
+        {
+            Vector3 cameraEyePosition =
+                camera.Position +
+                new Vector3(
+                    0f,
+                    0f,
+                    CameraEyeHeightMeters
+                );
+
+            Vector3 vehicleTargetPosition =
+                vehicle.Position +
+                new Vector3(0f, 0f, 0.5f);
+
+            RaycastResult result = World.Raycast(
+                cameraEyePosition,
+                vehicleTargetPosition,
+                IntersectFlags.Map |
+                IntersectFlags.Objects |
+                IntersectFlags.Vehicles,
+                camera.Prop
+            );
+
+            if (!result.DidHit)
+            {
+                return true;
+            }
+
+            return
+                result.HitEntity != null &&
+                result.HitEntity.Exists() &&
+                result.HitEntity.Handle == vehicle.Handle;
+        }
+        
+        
+        private void DeleteActiveCamera(
+            ActiveCamera camera
+        )
+        {
+            if (
+                camera.CameraBlip != null &&
+                camera.CameraBlip.Exists()
+            )
+            {
+                camera.CameraBlip.Delete();
+            }
+
+            if (
+                camera.ConeBlip != null &&
+                camera.ConeBlip.Exists()
+            )
+            {
+                camera.ConeBlip.Delete();
+            }
+
+            if (
+                camera.Prop != null &&
+                camera.Prop.Exists()
+            )
+            {
+                camera.Prop.Delete();
+            }
+        }
+
+        private void DeleteActiveCameras()
+        {
+            foreach (ActiveCamera camera in _activeCameras.Values)
+            {
+                DeleteActiveCamera(camera);
+            }
+
+            _activeCameras.Clear();
+        }
+
+        private void ShowNearestActiveCameraDebug()
+        {
+            if (_activeCameras.Count == 0)
+            {
+                GTA.UI.Notification.Show(
+                    "~y~No active JSON cameras"
+                );
+                return;
+            }
+
+            Vector3 playerPosition =
+                Game.Player.Character.Position;
+
+            ActiveCamera nearestCamera = null;
+            float nearestDistanceSquared = float.MaxValue;
+
+            foreach (ActiveCamera camera in _activeCameras.Values)
+            {
+                float offsetX =
+                    camera.Position.X - playerPosition.X;
+
+                float offsetY =
+                    camera.Position.Y - playerPosition.Y;
+
+                float distanceSquared =
+                    (offsetX * offsetX) +
+                    (offsetY * offsetY);
+
+                if (distanceSquared < nearestDistanceSquared)
+                {
+                    nearestDistanceSquared = distanceSquared;
+                    nearestCamera = camera;
+                }
+            }
+
+            if (nearestCamera == null)
+            {
+                return;
+            }
+
+            float distance =
+                (float)Math.Sqrt(nearestDistanceSquared);
+
+            bool propExists =
+                nearestCamera.Prop != null &&
+                nearestCamera.Prop.Exists();
+
+            GTA.UI.Notification.Show(
+                $"ID: {nearestCamera.Definition.osmId} | " +
+                $"X: {nearestCamera.Position.X:0.0} | " +
+                $"Y: {nearestCamera.Position.Y:0.0} | " +
+                $"Z: {nearestCamera.Position.Z:0.0} | " +
+                $"Distance: {distance:0.0}m | " +
+                $"Prop exists: {propExists}"
             );
         }
     }
