@@ -11,5 +11,6 @@ namespace FlockSurveillance
         public Blip CameraBlip { get; set; }
         public Blip ConeBlip { get; set; }
         public bool WasReportableSighting { get; set; }
+        public int WeaponHitCount { get; set; }
     }
 }

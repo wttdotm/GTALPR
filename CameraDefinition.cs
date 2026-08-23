@@ -8,5 +8,6 @@ namespace FlockSurveillance
         public float X { get; set; }
         public float Y { get; set; }
         public float Heading { get; set; }
+        public bool IsDestroyed { get; set; }
     }
 }

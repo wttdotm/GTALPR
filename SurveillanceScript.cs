@@ -46,6 +46,25 @@ namespace FlockSurveillance
         private float _cameraHeading;
         private const float CameraEyeHeightMeters = 7.20f;
 
+
+        //loot drop stuff
+
+        private readonly List<LootDrop> _lootDrops =
+            new List<LootDrop>();
+
+        private const string LootPropModel =
+            "prop_cs_cardbox_01";
+
+        private const float AutoLootDistanceMeters = 1.25f;
+        private const float ManualLootDistanceMeters = 3f;
+
+        private int _copperScrap;
+        private int _electronicComponents;
+        private int _goldPlatedContacts;
+
+
+
+
         // Player visibility stuff
         private bool _wasReportableSighting;
 
@@ -74,6 +93,11 @@ namespace FlockSurveillance
                 LoadCameraDefinitionsFromJson();
             }
             UpdateNearbyCameras();
+            UpdateCameraDestruction();
+            UpdateLootDrops();
+            TryCollectNearbyLoot(
+                AutoLootDistanceMeters
+            );
             DrawNearbyCameraFieldsOfView();
 
             if (!_cameraPlaced)
@@ -238,6 +262,24 @@ namespace FlockSurveillance
 
         private void OnKeyDown(object sender, KeyEventArgs e)
         {
+            
+            if (e.KeyCode == Keys.E)
+            {
+                if (
+                    TryCollectNearbyLoot(
+                        ManualLootDistanceMeters
+                    )
+                )
+                {
+                    return;
+                }
+            }
+
+            if (e.KeyCode == Keys.F3)
+            {
+                ShowLootInventory();
+                return;
+            }
             if (e.KeyCode == Keys.F12)
             {
                 ShowNearestActiveCameraDebug();
@@ -529,6 +571,7 @@ namespace FlockSurveillance
             DeleteCameraBlip();
             DeleteCameraProp();
             DeleteActiveCameras();
+            DeleteLootDrops();
         }
         
         
@@ -729,7 +772,8 @@ namespace FlockSurveillance
                 return;
             }
 
-            _nextCameraStreamingCheck = Game.GameTime + 1000;
+            _nextCameraStreamingCheck =
+                Game.GameTime + 1000;
 
             Vector3 playerPosition =
                 Game.Player.Character.Position;
@@ -740,31 +784,47 @@ namespace FlockSurveillance
 
             Model model = new Model(CameraPropModel);
 
-            foreach (CameraDefinition definition in _cameraDefinitions)
+            foreach (
+                CameraDefinition definition
+                in _cameraDefinitions
+            )
             {
-                float offsetX = definition.X - playerPosition.X;
-                float offsetY = definition.Y - playerPosition.Y;
+                float offsetX =
+                    definition.X - playerPosition.X;
+
+                float offsetY =
+                    definition.Y - playerPosition.Y;
 
                 float distanceSquared =
                     (offsetX * offsetX) +
                     (offsetY * offsetY);
 
-                bool shouldBeActive =
-                    distanceSquared <= activationDistanceSquared;
+                bool isWithinRange =
+                    distanceSquared <=
+                    activationDistanceSquared;
 
                 ActiveCamera activeCamera;
 
                 if (
-                    shouldBeActive &&
-                    !_activeCameras.ContainsKey(definition.osmId)
+                    isWithinRange &&
+                    !definition.IsDestroyed &&
+                    !_activeCameras.ContainsKey(
+                        definition.osmId
+                    )
                 )
                 {
-                    if (!model.IsValid || !model.IsInCdImage)
+                    if (
+                        !model.IsValid ||
+                        !model.IsInCdImage
+                    )
                     {
                         continue;
                     }
 
-                    if (!model.IsLoaded && !model.Request(1000))
+                    if (
+                        !model.IsLoaded &&
+                        !model.Request(1000)
+                    )
                     {
                         continue;
                     }
@@ -776,52 +836,57 @@ namespace FlockSurveillance
                         playerPosition.Z
                     );
 
-                    float groundZ;
-
-                    using (OutputArgument groundZOutput = new OutputArgument())
-                    {
-                        bool foundGround = Function.Call<bool>(
-                            Hash.GET_GROUND_Z_FOR_3D_COORD,
+                    Vector3 groundRayStart =
+                        new Vector3(
                             definition.X,
                             definition.Y,
-                            playerPosition.Z + 100f,
-                            groundZOutput,
-                            false,
-                            false
+                            playerPosition.Z + 100f
                         );
 
-                        if (!foundGround)
-                        {
-                            // Terrain is not ready. The one-second update
-                            // loop will try this camera again.
-                            continue;
-                        }
+                    Vector3 groundRayEnd =
+                        new Vector3(
+                            definition.X,
+                            definition.Y,
+                            playerPosition.Z - 200f
+                        );
 
-                        groundZ = groundZOutput.GetResult<float>();
+                    RaycastResult groundRay =
+                        World.Raycast(
+                            groundRayStart,
+                            groundRayEnd,
+                            IntersectFlags.Map,
+                            null
+                        );
 
-                        if (
-                            groundZ < 1f &&
-                            playerPosition.Z > 5f
-                        )
-                        {
-                            continue;
-                        }
+                    if (!groundRay.DidHit)
+                    {
+                        // Collision is not ready yet.
+                        // Retry on the next update.
+                        continue;
                     }
 
-                    Vector3 spawnPosition = new Vector3(
-                        definition.X,
-                        definition.Y,
-                        groundZ
-                    );
+                    float groundZ =
+                        groundRay.HitPosition.Z;
 
-                    Prop cameraProp = World.CreateProp(
-                        model,
-                        spawnPosition,
-                        false,
-                        true
-                    );
+                    Vector3 spawnPosition =
+                        new Vector3(
+                            definition.X,
+                            definition.Y,
+                            groundZ
+                        );
 
-                    if (cameraProp == null || !cameraProp.Exists())
+                    Prop cameraProp =
+                        World.CreateProp(
+                            model,
+                            spawnPosition,
+                            true,
+                            true
+                        );
+
+                    if (
+                        cameraProp == null ||
+                        !cameraProp.Exists()
+                    )
                     {
                         continue;
                     }
@@ -835,6 +900,13 @@ namespace FlockSurveillance
 
                     cameraProp.IsPositionFrozen = true;
                     cameraProp.IsCollisionEnabled = true;
+                    cameraProp.IsInvincible = false;
+                    cameraProp.IsBulletProof = false;
+                    cameraProp.IsFireProof = false;
+                    cameraProp.IsExplosionProof = false;
+                    cameraProp.IsMeleeProof = false;
+                    cameraProp.IsCollisionProof = false;
+                    cameraProp.IsRecordingCollisions = true;
 
                     activeCamera = new ActiveCamera
                     {
@@ -843,7 +915,9 @@ namespace FlockSurveillance
                         Prop = cameraProp
                     };
 
-                    CreateActiveCameraBlips(activeCamera);
+                    CreateActiveCameraBlips(
+                        activeCamera
+                    );
 
                     _activeCameras.Add(
                         definition.osmId,
@@ -851,7 +925,7 @@ namespace FlockSurveillance
                     );
                 }
                 else if (
-                    !shouldBeActive &&
+                    !isWithinRange &&
                     _activeCameras.TryGetValue(
                         definition.osmId,
                         out activeCamera
@@ -859,13 +933,15 @@ namespace FlockSurveillance
                 )
                 {
                     DeleteActiveCamera(activeCamera);
-                    _activeCameras.Remove(definition.osmId);
+
+                    _activeCameras.Remove(
+                        definition.osmId
+                    );
                 }
             }
 
             model.MarkAsNoLongerNeeded();
         }
-
         private void CreateActiveCameraBlips(
             ActiveCamera camera
         )
@@ -912,6 +988,13 @@ namespace FlockSurveillance
 
             foreach (ActiveCamera camera in _activeCameras.Values)
             {
+                //skip destroyed cameras
+                if (camera.Definition.IsDestroyed)
+                {
+                    continue;
+                }
+
+
                 bool vehicleInsideFov =
                     playerIsInVehicle &&
                     IsVehicleInsideFieldOfView(
@@ -1090,21 +1173,7 @@ namespace FlockSurveillance
             ActiveCamera camera
         )
         {
-            if (
-                camera.CameraBlip != null &&
-                camera.CameraBlip.Exists()
-            )
-            {
-                camera.CameraBlip.Delete();
-            }
-
-            if (
-                camera.ConeBlip != null &&
-                camera.ConeBlip.Exists()
-            )
-            {
-                camera.ConeBlip.Delete();
-            }
+            DeleteActiveCameraBlips(camera);
 
             if (
                 camera.Prop != null &&
@@ -1180,6 +1249,345 @@ namespace FlockSurveillance
                 $"Distance: {distance:0.0}m | " +
                 $"Prop exists: {propExists}"
             );
+        }
+
+        private void UpdateCameraDestruction()
+        {
+            Vehicle playerVehicle =
+                Game.Player.Character.CurrentVehicle;
+
+            foreach (ActiveCamera camera in _activeCameras.Values)
+            {
+                if (
+                    camera.Definition.IsDestroyed ||
+                    camera.Prop == null ||
+                    !camera.Prop.Exists()
+                )
+                {
+                    continue;
+                }
+
+                if (camera.Prop.HasBeenDamagedByAnyWeapon())
+                {
+                    camera.WeaponHitCount++;
+                    camera.Prop.ClearLastWeaponDamage();
+
+                    if (camera.WeaponHitCount >= 3)
+                    {
+                        DestroyCamera(camera);
+                        continue;
+                    }
+                }
+
+                bool struckByPlayerVehicle =
+                    playerVehicle != null &&
+                    playerVehicle.Exists() &&
+                    playerVehicle.Speed > 5f &&
+                    camera.Prop.HasBeenDamagedBy(playerVehicle);
+
+                if (struckByPlayerVehicle)
+                {
+                    DestroyCamera(camera);
+                }
+            }
+        }
+        private void DestroyCamera(
+            ActiveCamera camera
+        )
+        {
+            if (camera.Definition.IsDestroyed)
+            {
+                return;
+            }
+
+            camera.Definition.IsDestroyed = true;
+            camera.WasReportableSighting = false;
+
+            DeleteActiveCameraBlips(camera);
+
+            if (camera.Prop == null || !camera.Prop.Exists())
+            {
+                return;
+            }
+
+            camera.Prop.IsPositionFrozen = false;
+            camera.Prop.IsInvincible = false;
+            camera.Prop.IsCollisionEnabled = true;
+
+            Vector3 playerPosition =
+                Game.Player.Character.Position;
+
+            float offsetX =
+                camera.Position.X - playerPosition.X;
+
+            float offsetY =
+                camera.Position.Y - playerPosition.Y;
+
+            float length =
+                (float)Math.Sqrt(
+                    (offsetX * offsetX) +
+                    (offsetY * offsetY)
+                );
+
+            Vector3 fallDirection;
+
+            if (length < 0.001f)
+            {
+                fallDirection = HeadingToDirection(
+                    Game.Player.Character.Heading
+                );
+            }
+            else
+            {
+                fallDirection = new Vector3(
+                    offsetX / length,
+                    offsetY / length,
+                    0f
+                );
+            }
+
+            camera.Prop.ApplyForce(
+                (fallDirection * 35f) +
+                new Vector3(0f, 0f, 5f),
+                new Vector3(
+                    0f,
+                    0f,
+                    CameraEyeHeightMeters
+                ),
+                ForceType.MaxForceRot2
+            );
+
+            SpawnCameraLoot(camera.Position);
+
+            GTA.UI.Notification.Show(
+                "~r~Flock camera destroyed"
+            );
+        }
+
+        private void DeleteActiveCameraBlips(
+            ActiveCamera camera
+        )
+        {
+            if (
+                camera.CameraBlip != null &&
+                camera.CameraBlip.Exists()
+            )
+            {
+                camera.CameraBlip.Delete();
+            }
+
+            camera.CameraBlip = null;
+
+            if (
+                camera.ConeBlip != null &&
+                camera.ConeBlip.Exists()
+            )
+            {
+                camera.ConeBlip.Delete();
+            }
+
+            camera.ConeBlip = null;
+        }
+
+        private void SpawnCameraLoot(
+            Vector3 cameraPosition
+        )
+        {
+            Model model = new Model(LootPropModel);
+
+            if (!model.IsValid || !model.IsInCdImage)
+            {
+                GTA.UI.Notification.Show(
+                    "~r~Loot model is invalid"
+                );
+                return;
+            }
+
+            if (!model.Request(1000))
+            {
+                GTA.UI.Notification.Show(
+                    "~r~Could not load loot model"
+                );
+                return;
+            }
+
+            Vector3 dropPosition =
+                cameraPosition +
+                new Vector3(1f, 0f, 0.25f);
+
+            Prop lootProp = World.CreateProp(
+                model,
+                dropPosition,
+                false,
+                true
+            );
+
+            model.MarkAsNoLongerNeeded();
+
+            if (lootProp == null || !lootProp.Exists())
+            {
+                GTA.UI.Notification.Show(
+                    "~r~Could not create camera loot"
+                );
+                return;
+            }
+
+            lootProp.IsPositionFrozen = true;
+            lootProp.IsCollisionEnabled = false;
+
+            LootDrop drop = new LootDrop
+            {
+                Prop = lootProp,
+                Position = lootProp.Position,
+                CopperScrap = 3,
+                ElectronicComponents = 2,
+                GoldPlatedContacts = 1
+            };
+
+            _lootDrops.Add(drop);
+
+            GTA.UI.Notification.Show(
+                "~y~Camera components dropped"
+            );
+        }
+
+        private void UpdateLootDrops()
+        {
+            for (int i = _lootDrops.Count - 1; i >= 0; i--)
+            {
+                LootDrop drop = _lootDrops[i];
+
+                if (
+                    drop.Prop == null ||
+                    !drop.Prop.Exists()
+                )
+                {
+                    _lootDrops.RemoveAt(i);
+                    continue;
+                }
+
+                drop.Position = drop.Prop.Position;
+
+                World.DrawMarker(
+                    MarkerType.VerticalCylinder,
+                    drop.Position +
+                    new Vector3(0f, 0f, 0.15f),
+                    Vector3.Zero,
+                    Vector3.Zero,
+                    new Vector3(0.5f, 0.5f, 0.15f),
+                    Color.FromArgb(150, 255, 180, 0),
+                    false,
+                    false,
+                    false,
+                    null,
+                    null,
+                    false
+                );
+            }
+        }
+        private bool TryCollectNearbyLoot(
+            float pickupDistanceMeters
+        )
+        {
+            Ped player = Game.Player.Character;
+
+            Vehicle playerVehicle =
+                player.CurrentVehicle;
+
+            if (
+                playerVehicle != null &&
+                playerVehicle.Exists()
+            )
+            {
+                return false;
+            }
+
+            float pickupDistanceSquared =
+                pickupDistanceMeters *
+                pickupDistanceMeters;
+
+            for (int i = _lootDrops.Count - 1; i >= 0; i--)
+            {
+                LootDrop drop = _lootDrops[i];
+
+                if (
+                    drop.Prop == null ||
+                    !drop.Prop.Exists()
+                )
+                {
+                    _lootDrops.RemoveAt(i);
+                    continue;
+                }
+
+                float offsetX =
+                    drop.Position.X - player.Position.X;
+
+                float offsetY =
+                    drop.Position.Y - player.Position.Y;
+
+                float offsetZ =
+                    drop.Position.Z - player.Position.Z;
+
+                float distanceSquared =
+                    (offsetX * offsetX) +
+                    (offsetY * offsetY) +
+                    (offsetZ * offsetZ);
+
+                if (distanceSquared > pickupDistanceSquared)
+                {
+                    continue;
+                }
+
+                _copperScrap += drop.CopperScrap;
+
+                _electronicComponents +=
+                    drop.ElectronicComponents;
+
+                _goldPlatedContacts +=
+                    drop.GoldPlatedContacts;
+
+                drop.Prop.Delete();
+                _lootDrops.RemoveAt(i);
+
+                GTA.UI.Notification.Show(
+                    "~g~Collected camera components~s~\n" +
+                    "+3 Copper Scrap\n" +
+                    "+2 Electronic Components\n" +
+                    "+1 Gold-Plated Contact"
+                );
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private void ShowLootInventory()
+        {
+            GTA.UI.Notification.Show(
+                "~b~Salvage Inventory~s~\n" +
+                $"Copper Scrap: {_copperScrap}\n" +
+                $"Electronic Components: " +
+                $"{_electronicComponents}\n" +
+                $"Gold-Plated Contacts: " +
+                $"{_goldPlatedContacts}"
+            );
+        }
+
+        private void DeleteLootDrops()
+        {
+            foreach (LootDrop drop in _lootDrops)
+            {
+                if (
+                    drop.Prop != null &&
+                    drop.Prop.Exists()
+                )
+                {
+                    drop.Prop.Delete();
+                }
+            }
+
+            _lootDrops.Clear();
         }
     }
 }   
