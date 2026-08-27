@@ -13,5 +13,6 @@ namespace FlockSurveillance
         public bool WasReportableSighting { get; set; }
         public int WeaponHitCount { get; set; }
         public Vector3[] FovEndpoints { get; set; }
+        public bool WasSeeingPlayer { get; set; }
     }
 }
