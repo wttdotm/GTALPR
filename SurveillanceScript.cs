@@ -24,6 +24,7 @@ namespace FlockSurveillance
 
         private readonly Dictionary<string, ActiveCamera> _activeCameras =
             new Dictionary<string, ActiveCamera>();
+            
 
         private const float CameraActivationDistanceMeters = 150f;
         private int _nextCameraStreamingCheck;
@@ -38,12 +39,14 @@ namespace FlockSurveillance
         // private const float CameraVisualBottomLocalZ = -0.01f;
         //eventually this will be flock cameras
         // private const string CameraPropModel = "prop_flock_camera";
-        // private const string CameraPropModel = "flockcamera";
+        private const string CameraPropModel = "flockfragment";
         // private const float CameraVisualBottomLocalZ = -0.5f; //for prop_flock_camera
-        private const string CameraPropModel = "prop_cctv_pole_01a";
+        // private const string CameraPropModel = "prop_cctv_pole_01a";
         // private const string CameraPropModel = "prop_flock_camera_v4";
         private const float CameraVisualBottomLocalZ = -0.01f; //for flock_camera_v2
         private const float CameraPropHeadingOffsetDegrees = 245f;
+        private const float CameraModelRotationAdjustmentDegrees =
+            24f; //for flockfragment
         
         // private const string CameraPropModel = "flock_camera_v3";
 
@@ -57,7 +60,7 @@ namespace FlockSurveillance
         private Vector3 _cameraPosition;
         private Vector3[] _cameraFovEndpoints;
         private float _cameraHeading;
-        private const float CameraEyeHeightMeters = 7.20f;
+        private const float CameraEyeHeightMeters = 3.49f;
 
 
         //loot drop stuff
@@ -93,6 +96,7 @@ namespace FlockSurveillance
 
         // Player visibility stuff
         private bool _wasReportableSighting;
+        private bool _wasSeeingPlayer;
 
 
         // blip is name for the stuff that appears on the map
@@ -125,6 +129,7 @@ namespace FlockSurveillance
                 AutoLootDistanceMeters
             );
             DrawNearbyCameraFieldsOfView();
+            UpdateCameraAudio();
 
             if (!_cameraPlaced)
             {
@@ -171,9 +176,21 @@ namespace FlockSurveillance
                 playerVehicle != null &&
                 playerVehicle.Exists();
 
-            bool reportableSighting =
+            bool cameraCanSeePlayer =
                 playerVisible &&
-                playerIsInVehicle &&
+                playerIsInVehicle;
+
+            bool isNewSighting =
+                cameraCanSeePlayer &&
+                !_wasSeeingPlayer;
+
+            if (isNewSighting)
+            {
+                PlayPictureTakenSound();
+            }
+
+            bool reportableSighting =
+                cameraCanSeePlayer &&
                 Game.Player.WantedLevel > 0;
 
             if (
@@ -181,9 +198,17 @@ namespace FlockSurveillance
                 !_wasReportableSighting
             )
             {
+                // The player may have become wanted while already
+                // inside the camera's view.
+                if (!isNewSighting)
+                {
+                    PlayPictureTakenSound();
+                }
+
                 ReportFlockCameraSighting();
             }
 
+            _wasSeeingPlayer = cameraCanSeePlayer;
             _wasReportableSighting = reportableSighting;
         }
 
@@ -301,11 +326,7 @@ namespace FlockSurveillance
                 }
             }
 
-            if (e.KeyCode == Keys.F3)
-            {
-                ShowLootInventory();
-                return;
-            }
+
             if (e.KeyCode == Keys.F12)
             {
                 ShowNearestActiveCameraDebug();
@@ -486,26 +507,46 @@ namespace FlockSurveillance
             Color color
         )
         {
-            if (endpoints == null || endpoints.Length == 0)
+            if (
+                endpoints == null ||
+                endpoints.Length == 0
+            )
             {
                 return;
             }
 
             Vector3 origin =
                 cameraPosition +
-                new Vector3(0f, 0f, CameraEyeHeightMeters);
+                new Vector3(
+                    0f,
+                    0f,
+                    CameraEyeHeightMeters
+                );
 
             for (int i = 0; i < endpoints.Length; i++)
             {
+                bool isCenterLine =
+                    i == FovSegments / 2;
+
+                Color fieldOfViewLineColor =
+                    isCenterLine
+                        ? Color.FromArgb(
+                            220,
+                            0,
+                            120,
+                            255
+                        )
+                        : Color.FromArgb(
+                            45,
+                            color.R,
+                            color.G,
+                            color.B
+                        );
+
                 DrawLine(
                     origin,
                     endpoints[i],
-                    Color.FromArgb(
-                        45,
-                        color.R,
-                        color.G,
-                        color.B
-                    )
+                    fieldOfViewLineColor
                 );
 
                 if (i > 0)
@@ -571,36 +612,32 @@ namespace FlockSurveillance
                 color.A
             );
         }
+        
         private void CreateCameraBlip()
         {
             DeleteCameraBlip();
 
-            Vector3 cameraForward =
-                HeadingToDirection(_cameraHeading);
+            _cameraBlip =
+                _cameraProp.AddBlip();
 
-            Vector3 coneCenter =
-                _cameraPosition +
-                (cameraForward * (CameraRangeMeters + 4.5f / 2f));
+            _cameraBlip.Sprite =
+                BlipSprite.CCTV;
 
-            _cameraConeBlip = World.CreateBlip(coneCenter);
-            _cameraConeBlip.Sprite = BlipSprite.Parachute2;
-            _cameraConeBlip.Color = BlipColor.Red;
-            _cameraConeBlip.Alpha = 70;
-            _cameraConeBlip.ScaleX = 4.5f;
-            _cameraConeBlip.ScaleY = 3.0f;
-            _cameraConeBlip.RotationFloat = _cameraHeading;
-            _cameraConeBlip.IsShortRange = false;
-            _cameraConeBlip.IsHiddenOnLegend = true;
-            _cameraConeBlip.DisplayType = BlipDisplayType.MiniMapOnly;
+            _cameraBlip.Color =
+                BlipColor.Red;
 
-            _cameraBlip = _cameraProp.AddBlip();
-            _cameraBlip.Sprite = BlipSprite.CCTV;
-            _cameraBlip.Color = BlipColor.Red;
-            _cameraBlip.Scale = 1.65f;
-            _cameraBlip.Name = "Surveillance Camera";
-            _cameraBlip.IsShortRange = false;
+            _cameraBlip.Scale =
+                1.65f;
+
+            _cameraBlip.Name =
+                "Surveillance Camera";
+
+            _cameraBlip.IsShortRange =
+                false;
+
             _cameraBlip.Rotation =
-                ((int)_cameraHeading + 180) % 360;
+                ((int)_cameraHeading + 180) %
+                360;
         }
 
         private void DeleteCameraBlip()
@@ -634,6 +671,7 @@ namespace FlockSurveillance
 
         private void OnAborted(object sender, EventArgs e)
         {
+            StopCameraAudio();
             DeleteCameraBlip();
             DeleteCameraProp();
             DeleteActiveCameras();
@@ -729,7 +767,7 @@ namespace FlockSurveillance
                 model,
                 position,
                 true, // Dynamic
-                true  // Place on ground using the model's collision bounds
+                false // false lets the raycast determine the position //true  // Place on ground using the model's collision bounds
             );
 
             if (prop == null || !prop.Exists())
@@ -737,12 +775,24 @@ namespace FlockSurveillance
                 return null;
             }
 
+            // float propHeading =
+            //     (
+            //         cameraHeading +
+            //         CameraPropHeadingOffsetDegrees +
+            //         360f
+            //     ) % 360f;
+
             float propHeading =
                 (
                     cameraHeading +
                     CameraPropHeadingOffsetDegrees +
-                    360f
+                    CameraModelRotationAdjustmentDegrees
                 ) % 360f;
+
+            if (propHeading < 0f)
+            {
+                propHeading += 360f;
+            }
 
             prop.Rotation =
                 new Vector3(0f, 0f, propHeading);
@@ -770,6 +820,23 @@ namespace FlockSurveillance
 
             _cameraProp = null;
             _cameraFovEndpoints = null;
+        }
+
+        private static float CompassHeadingToGtaHeading(
+            float compassHeading
+        )
+        {
+            float normalizedHeading =
+                compassHeading % 360f;
+
+            if (normalizedHeading < 0f)
+            {
+                normalizedHeading += 360f;
+            }
+
+            return
+                (360f - normalizedHeading) %
+                360f;
         }
 
         //COP stuff
@@ -841,8 +908,24 @@ namespace FlockSurveillance
                 Game.Player
             );
 
+            ScheduleWantedReportAudio();
+
             GTA.UI.Notification.Show(
                 "~r~Flock Camera Sighting Reported!"
+            );
+        }
+
+        private void ReportFalsePositiveFlockCameraSighting()
+        {
+            Function.Call(
+                Hash.REPORT_POLICE_SPOTTED_PLAYER,
+                Game.Player
+            );
+
+            ScheduleFalsePositiveReportAudio();
+
+            GTA.UI.Notification.Show(
+                "~r~Flock Camera Error: Civilian Reported As Criminal!"
             );
         }
 
@@ -894,6 +977,17 @@ namespace FlockSurveillance
                 {
                     _cameraDefinitions =
                         new List<CameraDefinition>();
+                }
+
+                foreach (
+                    CameraDefinition definition
+                    in _cameraDefinitions
+                )
+                {
+                    definition.Heading =
+                        CompassHeadingToGtaHeading(
+                            definition.Heading
+                        );
                 }
 
 
@@ -1077,33 +1171,29 @@ namespace FlockSurveillance
             ActiveCamera camera
         )
         {
-            Vector3 forward =
-                HeadingToDirection(camera.Definition.Heading);
+            camera.CameraBlip =
+                camera.Prop.AddBlip();
 
-            Vector3 coneCenter =
-                camera.Position +
-                (forward * (CameraRangeMeters + 4.5f / 2f));
+            camera.CameraBlip.Sprite =
+                BlipSprite.CCTV;
 
-            camera.ConeBlip = World.CreateBlip(coneCenter);
-            camera.ConeBlip.Sprite = BlipSprite.Parachute2;
-            camera.ConeBlip.Color = BlipColor.Red;
-            camera.ConeBlip.Alpha = 70;
-            camera.ConeBlip.ScaleX = 4.5f;
-            camera.ConeBlip.ScaleY = 3.0f;
-            camera.ConeBlip.RotationFloat =
-                camera.Definition.Heading;
-            camera.ConeBlip.IsHiddenOnLegend = true;
-            camera.ConeBlip.DisplayType =
-                BlipDisplayType.MiniMapOnly;
+            camera.CameraBlip.Color =
+                BlipColor.Red;
 
-            camera.CameraBlip = camera.Prop.AddBlip();
-            camera.CameraBlip.Sprite = BlipSprite.CCTV;
-            camera.CameraBlip.Color = BlipColor.Red;
-            camera.CameraBlip.Scale = 1.65f;
-            camera.CameraBlip.Name = "Flock Camera";
-            camera.CameraBlip.IsShortRange = false;
+            camera.CameraBlip.Scale =
+                1.65f;
+
+            camera.CameraBlip.Name =
+                "Flock Camera";
+
+            camera.CameraBlip.IsShortRange =
+                false;
+
             camera.CameraBlip.Rotation =
-                ((int)camera.Definition.Heading + 180) % 360;
+                (
+                    (int)camera.Definition.Heading +
+                    180
+                ) % 360;
         }
 
         private void DrawNearbyCameraFieldsOfView()
@@ -1182,10 +1272,40 @@ namespace FlockSurveillance
                     );
                 }
 
-                bool reportableSighting =
+                bool cameraCanSeePlayer =
                     playerIsInVehicle &&
                     vehicleInsideFov &&
-                    hasLineOfSight &&
+                    hasLineOfSight;
+
+                bool isNewSighting =
+                    cameraCanSeePlayer &&
+                    !camera.WasSeeingPlayer;
+
+                camera.WasSeeingPlayer =
+                    cameraCanSeePlayer;
+
+                // Every sighting takes a picture, even when the player
+                // is innocent and no false positive occurs.
+                if (isNewSighting)
+                {
+                    PlayPictureTakenSound();
+                }
+
+                if (
+                    isNewSighting &&
+                    Game.Player.WantedLevel == 0 &&
+                    _random.NextDouble() < 0.25
+                )
+                {
+                    Game.Player.WantedLevel =
+                        _random.Next(1, 6);
+
+                    ReportFalsePositiveFlockCameraSighting();
+                    sightingReportedThisTick = true;
+                }
+
+                bool reportableSighting =
+                    cameraCanSeePlayer &&
                     Game.Player.WantedLevel > 0;
 
                 if (
@@ -1194,6 +1314,13 @@ namespace FlockSurveillance
                     !sightingReportedThisTick
                 )
                 {
+                    // If the player became wanted while remaining in view,
+                    // take a fresh report picture first.
+                    if (!isNewSighting)
+                    {
+                        PlayPictureTakenSound();
+                    }
+
                     ReportFlockCameraSighting();
                     sightingReportedThisTick = true;
                 }
@@ -1422,19 +1549,67 @@ namespace FlockSurveillance
                     }
                 }
 
-                bool struckByPlayerVehicle =
+                bool validPlayerVehicle =
                     playerVehicle != null &&
                     playerVehicle.Exists() &&
-                    playerVehicle.Speed > 3f &&
-                    camera.Prop.IsTouching(playerVehicle);
+                    playerVehicle.Speed > 3f;
+
+                if (!validPlayerVehicle)
+                {
+                    continue;
+                }
+
+                Vector3 offsetToCamera =
+                    camera.Prop.Position -
+                    playerVehicle.Position;
+
+                offsetToCamera.Z = 0f;
+
+                float distanceToCamera =
+                    offsetToCamera.Length();
+
+                if (distanceToCamera > 0.001f)
+                {
+                    Vector3 directionToCamera =
+                        offsetToCamera /
+                        distanceToCamera;
+
+                    Vector3 vehicleVelocity =
+                        playerVehicle.Velocity;
+
+                    float closingSpeed =
+                        (vehicleVelocity.X * directionToCamera.X) +
+                        (vehicleVelocity.Y * directionToCamera.Y);
+
+                    float unfreezeDistance =
+                        2.5f +
+                        Math.Min(
+                            playerVehicle.Speed * 0.10f,
+                            4f
+                        );
+
+                    bool impactIsImminent =
+                        closingSpeed > 1f &&
+                        distanceToCamera <= unfreezeDistance;
+
+                    if (impactIsImminent)
+                    {
+                        camera.Prop.IsPositionFrozen = false;
+                    }
+                }
+
+                bool struckByPlayerVehicle =
+                    camera.Prop.IsTouching(
+                        playerVehicle
+                    );
 
                 if (struckByPlayerVehicle)
                 {
-                    camera.Prop.IsPositionFrozen = false;
                     DestroyCamera(camera);
                 }
             }
         }
+        
         private void DestroyCamera(
             ActiveCamera camera
         )
@@ -1698,8 +1873,20 @@ namespace FlockSurveillance
                     "~g~Collected camera components~s~\n" +
                     "+3 Copper Scrap\n" +
                     "+2 Electronic Components\n" +
-                    "+1 Gold-Plated Contact"
+                    "+1 Gold-Plated Contact\n" + 
+                    "~g~+$500"
                 );
+
+                Game.Player.Money += 500;
+
+                Function.Call(
+                    Hash.PLAY_SOUND_FRONTEND,
+                    -1,
+                    "PURCHASE",
+                    "HUD_LIQUOR_STORE_SOUNDSET",
+                    true
+                );
+
 
                 return true;
             }
@@ -1874,7 +2061,194 @@ namespace FlockSurveillance
 
             birdModel.MarkAsNoLongerNeeded();
         }  
-    
+
+        //SOUND STUFF
+
+        // CAMERA AUDIO
+
+        private const int PictureToFollowupDelayMilliseconds = 225;
+        private const int ErrorToWantedDelayMilliseconds = 350;
+        private const int WantedReportDurationMilliseconds = 700;
+
+        private enum CameraAudioCue
+        {
+            MisidentificationError,
+            WantedReport
+        }
+
+        private sealed class ScheduledCameraAudioCue
+        {
+            public CameraAudioCue Cue { get; }
+            public int PlayAt { get; }
+
+            public ScheduledCameraAudioCue(
+                CameraAudioCue cue,
+                int playAt
+            )
+            {
+                Cue = cue;
+                PlayAt = playAt;
+            }
+        }
+
+        private readonly List<ScheduledCameraAudioCue>
+            _scheduledCameraAudioCues =
+                new List<ScheduledCameraAudioCue>();
+
+        private int _wantedReportSoundId = -1;
+        private int _wantedReportSoundStopAt = -1;
+
+        private static void PlayFrontendSound(
+            string soundName,
+            string soundSet
+        )
+        {
+            Function.Call(
+                Hash.PLAY_SOUND_FRONTEND,
+                -1,
+                soundName,
+                soundSet,
+                true
+            );
+        }
+
+        private static void PlayPictureTakenSound()
+        {
+            PlayFrontendSound(
+                "Camera_Shoot",
+                "Phone_Soundset_Franklin"
+            );
+        }
+
+        private void ScheduleCameraAudioCue(
+            CameraAudioCue cue,
+            int playAt
+        )
+        {
+            _scheduledCameraAudioCues.Add(
+                new ScheduledCameraAudioCue(
+                    cue,
+                    playAt
+                )
+            );
+
+            _scheduledCameraAudioCues.Sort(
+                (left, right) =>
+                    left.PlayAt.CompareTo(right.PlayAt)
+            );
+        }
+
+        private void ScheduleWantedReportAudio()
+        {
+            ScheduleCameraAudioCue(
+                CameraAudioCue.WantedReport,
+                Game.GameTime +
+                PictureToFollowupDelayMilliseconds
+            );
+        }
+
+        private void ScheduleFalsePositiveReportAudio()
+        {
+            int errorPlayAt =
+                Game.GameTime +
+                PictureToFollowupDelayMilliseconds;
+
+            ScheduleCameraAudioCue(
+                CameraAudioCue.MisidentificationError,
+                errorPlayAt
+            );
+
+            ScheduleCameraAudioCue(
+                CameraAudioCue.WantedReport,
+                errorPlayAt +
+                ErrorToWantedDelayMilliseconds
+            );
+        }
+
+        private void UpdateCameraAudio()
+        {
+            while (
+                _scheduledCameraAudioCues.Count > 0 &&
+                Game.GameTime >=
+                    _scheduledCameraAudioCues[0].PlayAt
+            )
+            {
+                ScheduledCameraAudioCue scheduledCue =
+                    _scheduledCameraAudioCues[0];
+
+                _scheduledCameraAudioCues.RemoveAt(0);
+
+                switch (scheduledCue.Cue)
+                {
+                    case CameraAudioCue.MisidentificationError:
+                        PlayFrontendSound(
+                            "Pin_Bad",
+                            "DLC_HEIST_BIOLAB_PREP_HACKING_SOUNDS"
+                        );
+                        break;
+
+                    case CameraAudioCue.WantedReport:
+                        StartWantedReportSound();
+                        break;
+                }
+            }
+
+            if (
+                _wantedReportSoundId >= 0 &&
+                Game.GameTime >= _wantedReportSoundStopAt
+            )
+            {
+                StopWantedReportSound();
+            }
+        }
+
+        private void StartWantedReportSound()
+        {
+            StopWantedReportSound();
+
+            _wantedReportSoundId = Function.Call<int>(
+                Hash.GET_SOUND_ID
+            );
+
+            Function.Call(
+                Hash.PLAY_SOUND_FRONTEND,
+                _wantedReportSoundId,
+                "Found_Target",
+                "POLICE_CHOPPER_CAM_SOUNDS",
+                false
+            );
+
+            _wantedReportSoundStopAt =
+                Game.GameTime +
+                WantedReportDurationMilliseconds;
+        }
+
+        private void StopWantedReportSound()
+        {
+            if (_wantedReportSoundId < 0)
+            {
+                return;
+            }
+
+            Function.Call(
+                Hash.STOP_SOUND,
+                _wantedReportSoundId
+            );
+
+            Function.Call(
+                Hash.RELEASE_SOUND_ID,
+                _wantedReportSoundId
+            );
+
+            _wantedReportSoundId = -1;
+            _wantedReportSoundStopAt = -1;
+        }
+
+        private void StopCameraAudio()
+        {
+            _scheduledCameraAudioCues.Clear();
+            StopWantedReportSound();
+        }  
     
     }
 }   
