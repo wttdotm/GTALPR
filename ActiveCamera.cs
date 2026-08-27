@@ -12,5 +12,6 @@ namespace FlockSurveillance
         public Blip ConeBlip { get; set; }
         public bool WasReportableSighting { get; set; }
         public int WeaponHitCount { get; set; }
+        public Vector3[] FovEndpoints { get; set; }
     }
 }

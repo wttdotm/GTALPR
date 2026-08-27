@@ -22,8 +22,8 @@ namespace FlockSurveillance
         private List<CameraDefinition> _cameraDefinitions =
             new List<CameraDefinition>();
 
-        private readonly Dictionary<long, ActiveCamera> _activeCameras =
-            new Dictionary<long, ActiveCamera>();
+        private readonly Dictionary<string, ActiveCamera> _activeCameras =
+            new Dictionary<string, ActiveCamera>();
 
         private const float CameraActivationDistanceMeters = 150f;
         private int _nextCameraStreamingCheck;
@@ -33,9 +33,21 @@ namespace FlockSurveillance
         private const float CameraRangeMeters = 44.86f;
         private const int FovSegments = 24;
         private const float PlacementDistanceMeters = 0.6096f;
+
+        private const float CameraGroundSinkMeters = 0.02f;
+        // private const float CameraVisualBottomLocalZ = -0.01f;
         //eventually this will be flock cameras
+        // private const string CameraPropModel = "prop_flock_camera";
+        // private const string CameraPropModel = "flockcamera";
+        // private const float CameraVisualBottomLocalZ = -0.5f; //for prop_flock_camera
         private const string CameraPropModel = "prop_cctv_pole_01a";
+        // private const string CameraPropModel = "prop_flock_camera_v4";
+        private const float CameraVisualBottomLocalZ = -0.01f; //for flock_camera_v2
         private const float CameraPropHeadingOffsetDegrees = 245f;
+        
+        // private const string CameraPropModel = "flock_camera_v3";
+
+
 
         private Prop _cameraProp;
 
@@ -43,6 +55,7 @@ namespace FlockSurveillance
 
         private bool _cameraPlaced;
         private Vector3 _cameraPosition;
+        private Vector3[] _cameraFovEndpoints;
         private float _cameraHeading;
         private const float CameraEyeHeightMeters = 7.20f;
 
@@ -62,6 +75,19 @@ namespace FlockSurveillance
         private int _electronicComponents;
         private int _goldPlatedContacts;
 
+
+
+        // Bird stuff
+        private const double BirdFlockSpawnChance = 0.99;
+        private const int MinimumBirdCount = 30;
+        private const int MaximumBirdCount = 50;
+
+        private readonly Random _random = new Random();
+
+        private static readonly string[] BirdModels =
+        {
+            "a_c_pigeon"
+        };
 
 
 
@@ -329,9 +355,24 @@ namespace FlockSurveillance
             Vector3 forward =
                 HeadingToDirection(_cameraHeading);
 
-            _cameraPosition =
+            Vector3 placementPosition =
                 player.Position +
                 (forward * PlacementDistanceMeters);
+
+            float groundZ =
+                World.GetGroundHeight(
+                    new Vector2(
+                        placementPosition.X,
+                        placementPosition.Y
+                    )
+                );
+
+            _cameraPosition =
+                new Vector3(
+                    placementPosition.X,
+                    placementPosition.Y,
+                    groundZ
+                );
 
             _wasReportableSighting = false;
 
@@ -348,6 +389,11 @@ namespace FlockSurveillance
             }
 
             _cameraPlaced = true;
+            _cameraFovEndpoints =
+            BuildFieldOfViewEndpoints(
+                _cameraPosition,
+                _cameraHeading
+            );
             CreateCameraBlip();
 
             GTA.UI.Notification.Show(
@@ -389,19 +435,9 @@ namespace FlockSurveillance
             DrawLine(lineStart, lineEnd, color);
         }
 
-        private void DrawFieldOfView(Color color)
-        {
-            DrawFieldOfView(
-                _cameraPosition,
-                _cameraHeading,
-                color
-            );
-        }
-
-        private void DrawFieldOfView(
+        private Vector3[] BuildFieldOfViewEndpoints(
             Vector3 cameraPosition,
-            float cameraHeading,
-            Color color
+            float cameraHeading
         )
         {
             Vector3 origin =
@@ -412,7 +448,9 @@ namespace FlockSurveillance
                 HeadingToDirection(cameraHeading);
 
             float halfFov = CameraFovDegrees / 2f;
-            Vector3 previousPoint = Vector3.Zero;
+
+            Vector3[] endpoints =
+                new Vector3[FovSegments + 1];
 
             for (int i = 0; i <= FovSegments; i++)
             {
@@ -425,13 +463,43 @@ namespace FlockSurveillance
                 Vector3 direction =
                     RotateAroundZ(forward, angle);
 
-                Vector3 endpoint =
+                endpoints[i] =
                     origin +
                     (direction * CameraRangeMeters);
+            }
 
+            return endpoints;
+        }
+
+        private void DrawFieldOfView(Color color)
+        {
+            DrawFieldOfView(
+                _cameraPosition,
+                _cameraFovEndpoints,
+                color
+            );
+        }
+
+        private void DrawFieldOfView(
+            Vector3 cameraPosition,
+            Vector3[] endpoints,
+            Color color
+        )
+        {
+            if (endpoints == null || endpoints.Length == 0)
+            {
+                return;
+            }
+
+            Vector3 origin =
+                cameraPosition +
+                new Vector3(0f, 0f, CameraEyeHeightMeters);
+
+            for (int i = 0; i < endpoints.Length; i++)
+            {
                 DrawLine(
                     origin,
-                    endpoint,
+                    endpoints[i],
                     Color.FromArgb(
                         45,
                         color.R,
@@ -443,8 +511,8 @@ namespace FlockSurveillance
                 if (i > 0)
                 {
                     DrawLine(
-                        previousPoint,
-                        endpoint,
+                        endpoints[i - 1],
+                        endpoints[i],
                         Color.FromArgb(
                             180,
                             color.R,
@@ -453,8 +521,6 @@ namespace FlockSurveillance
                         )
                     );
                 }
-
-                previousPoint = endpoint;
             }
         }
 
@@ -579,40 +645,120 @@ namespace FlockSurveillance
         {
             Model model = new Model(CameraPropModel);
 
-            if (!model.IsValid || !model.IsInCdImage)
+            if (!model.IsValid)
             {
+                GTA.UI.Notification.Show(
+                    $"~r~Model invalid~s~: {CameraPropModel} ({model.Hash})"
+                );
                 return false;
             }
 
-            if (!model.Request(1000))
+            if (!model.IsInCdImage)
             {
+                GTA.UI.Notification.Show(
+                    $"~r~Model not in CD image~s~: {CameraPropModel} ({model.Hash})"
+                );
                 return false;
             }
 
-            _cameraProp = World.CreateProp(
+            if (!model.Request(5000))
+            {
+                GTA.UI.Notification.Show(
+                    $"~r~Model stream timed out~s~: {CameraPropModel} ({model.Hash})"
+                );
+                return false;
+            }
+
+            Function.Call(
+                Hash.REQUEST_COLLISION_FOR_MODEL,
+                model.Hash
+            );
+
+            int collisionTimeout =
+                Game.GameTime + 2000;
+
+            while (
+                !Function.Call<bool>(
+                    Hash.HAS_COLLISION_FOR_MODEL_LOADED,
+                    model.Hash
+                ) &&
+                Game.GameTime < collisionTimeout
+            )
+            {
+                Script.Yield();
+            }
+
+            bool collisionLoaded =
+                Function.Call<bool>(
+                    Hash.HAS_COLLISION_FOR_MODEL_LOADED,
+                    model.Hash
+                );
+
+            GTA.UI.Notification.Show(
+                $"Collision loaded: {collisionLoaded}"
+            );
+
+            _cameraProp = CreateCameraPropInstance(
                 model,
                 _cameraPosition,
-                false,
-                true
+                _cameraHeading
             );
 
             model.MarkAsNoLongerNeeded();
 
-            if (_cameraProp == null || !_cameraProp.Exists())
+            if (_cameraProp == null)
             {
-                _cameraProp = null;
+                GTA.UI.Notification.Show(
+                    $"~r~CREATE_OBJECT failed~s~: {CameraPropModel} ({model.Hash})"
+                );
                 return false;
             }
 
-            _cameraProp.Heading =
-                (_cameraHeading + CameraPropHeadingOffsetDegrees + 360f) % 360f;
-            _cameraProp.IsPositionFrozen = true;
-            _cameraProp.IsCollisionEnabled = true;
-
-            // Save its actual position after GTA places it on the ground.
             _cameraPosition = _cameraProp.Position;
 
             return true;
+        }
+
+        private Prop CreateCameraPropInstance(
+            Model model,
+            Vector3 position,
+            float cameraHeading
+        )
+        {
+            Prop prop = World.CreateProp(
+                model,
+                position,
+                true, // Dynamic
+                true  // Place on ground using the model's collision bounds
+            );
+
+            if (prop == null || !prop.Exists())
+            {
+                return null;
+            }
+
+            float propHeading =
+                (
+                    cameraHeading +
+                    CameraPropHeadingOffsetDegrees +
+                    360f
+                ) % 360f;
+
+            prop.Rotation =
+                new Vector3(0f, 0f, propHeading);
+
+            prop.IsPositionFrozen = true;
+            prop.IsCollisionEnabled = true;
+
+            prop.IsInvincible = false;
+            prop.IsBulletProof = false;
+            prop.IsFireProof = false;
+            prop.IsExplosionProof = false;
+            prop.IsMeleeProof = false;
+            prop.IsCollisionProof = false;
+            prop.IsRecordingCollisions = true;
+
+            return prop;
         }
 
         private void DeleteCameraProp()
@@ -623,6 +769,7 @@ namespace FlockSurveillance
             }
 
             _cameraProp = null;
+            _cameraFovEndpoints = null;
         }
 
         //COP stuff
@@ -809,7 +956,7 @@ namespace FlockSurveillance
                     isWithinRange &&
                     !definition.IsDestroyed &&
                     !_activeCameras.ContainsKey(
-                        definition.osmId
+                        definition.FlockCameraId
                     )
                 )
                 {
@@ -876,43 +1023,27 @@ namespace FlockSurveillance
                         );
 
                     Prop cameraProp =
-                        World.CreateProp(
+                        CreateCameraPropInstance(
                             model,
                             spawnPosition,
-                            true,
-                            true
+                            definition.Heading
                         );
 
-                    if (
-                        cameraProp == null ||
-                        !cameraProp.Exists()
-                    )
+                    if (cameraProp == null)
                     {
                         continue;
                     }
-
-                    cameraProp.Heading =
-                        (
-                            definition.Heading +
-                            CameraPropHeadingOffsetDegrees +
-                            360f
-                        ) % 360f;
-
-                    cameraProp.IsPositionFrozen = true;
-                    cameraProp.IsCollisionEnabled = true;
-                    cameraProp.IsInvincible = false;
-                    cameraProp.IsBulletProof = false;
-                    cameraProp.IsFireProof = false;
-                    cameraProp.IsExplosionProof = false;
-                    cameraProp.IsMeleeProof = false;
-                    cameraProp.IsCollisionProof = false;
-                    cameraProp.IsRecordingCollisions = true;
 
                     activeCamera = new ActiveCamera
                     {
                         Definition = definition,
                         Position = cameraProp.Position,
-                        Prop = cameraProp
+                        Prop = cameraProp,
+                        FovEndpoints =
+                            BuildFieldOfViewEndpoints(
+                                cameraProp.Position,
+                                definition.Heading
+                            )
                     };
 
                     CreateActiveCameraBlips(
@@ -920,14 +1051,14 @@ namespace FlockSurveillance
                     );
 
                     _activeCameras.Add(
-                        definition.osmId,
+                        definition.FlockCameraId,
                         activeCamera
                     );
                 }
                 else if (
                     !isWithinRange &&
                     _activeCameras.TryGetValue(
-                        definition.osmId,
+                        definition.FlockCameraId,
                         out activeCamera
                     )
                 )
@@ -935,7 +1066,7 @@ namespace FlockSurveillance
                     DeleteActiveCamera(activeCamera);
 
                     _activeCameras.Remove(
-                        definition.osmId
+                        definition.FlockCameraId
                     );
                 }
             }
@@ -1026,7 +1157,7 @@ namespace FlockSurveillance
 
                 DrawFieldOfView(
                     camera.Position,
-                    camera.Definition.Heading,
+                    camera.FovEndpoints,
                     displayColor
                 );
 
@@ -1204,6 +1335,7 @@ namespace FlockSurveillance
                 return;
             }
 
+
             Vector3 playerPosition =
                 Game.Player.Character.Position;
 
@@ -1241,13 +1373,24 @@ namespace FlockSurveillance
                 nearestCamera.Prop != null &&
                 nearestCamera.Prop.Exists();
 
+            Vector3 livePosition =
+                propExists
+                    ? nearestCamera.Prop.Position
+                    : Vector3.Zero;
+
+            float playerZ =
+                playerPosition.Z;
+
             GTA.UI.Notification.Show(
                 $"ID: {nearestCamera.Definition.osmId} | " +
                 $"X: {nearestCamera.Position.X:0.0} | " +
                 $"Y: {nearestCamera.Position.Y:0.0} | " +
                 $"Z: {nearestCamera.Position.Z:0.0} | " +
                 $"Distance: {distance:0.0}m | " +
-                $"Prop exists: {propExists}"
+                $"Prop exists: {propExists} | "+ 
+                $"Stored Z: {nearestCamera.Position.Z:0.0} | " +
+                $"Live Z: {livePosition.Z:0.0} | " +
+                $"Player Z: {playerZ:0.0} | "
             );
         }
 
@@ -1282,11 +1425,12 @@ namespace FlockSurveillance
                 bool struckByPlayerVehicle =
                     playerVehicle != null &&
                     playerVehicle.Exists() &&
-                    playerVehicle.Speed > 5f &&
-                    camera.Prop.HasBeenDamagedBy(playerVehicle);
+                    playerVehicle.Speed > 3f &&
+                    camera.Prop.IsTouching(playerVehicle);
 
                 if (struckByPlayerVehicle)
                 {
+                    camera.Prop.IsPositionFrozen = false;
                     DestroyCamera(camera);
                 }
             }
@@ -1346,16 +1490,17 @@ namespace FlockSurveillance
                 );
             }
 
+            Vector3 breakupForce =
+                (fallDirection * 2.5f) +
+                new Vector3(0f, 0f, 0.5f);
+
             camera.Prop.ApplyForce(
-                (fallDirection * 35f) +
-                new Vector3(0f, 0f, 5f),
-                new Vector3(
-                    0f,
-                    0f,
-                    CameraEyeHeightMeters
-                ),
+                breakupForce,
+                Vector3.Zero,
                 ForceType.MaxForceRot2
             );
+
+            // TrySpawnBirdFlock(camera.Position);
 
             SpawnCameraLoot(camera.Position);
 
@@ -1589,5 +1734,147 @@ namespace FlockSurveillance
 
             _lootDrops.Clear();
         }
+
+        private void TrySpawnBirdFlock(
+            Vector3 cameraPosition
+        )
+        {
+            if (_random.NextDouble() >= BirdFlockSpawnChance)
+            {
+                return;
+            }
+
+            int birdCount = _random.Next(
+                MinimumBirdCount,
+                MaximumBirdCount + 1
+            );
+
+            string birdModelName =
+                BirdModels[_random.Next(BirdModels.Length)];
+
+            Model birdModel = new Model(birdModelName);
+
+            if (
+                !birdModel.IsValid ||
+                !birdModel.IsInCdImage ||
+                !birdModel.Request(1000)
+            )
+            {
+                return;
+            }
+
+            int wildAnimalGroup =
+                Game.GenerateHash("WILD_ANIMAL");
+
+            int playerGroup =
+                Game.GenerateHash("PLAYER");
+
+            Function.Call(
+                Hash.SET_RELATIONSHIP_BETWEEN_GROUPS,
+                5,
+                wildAnimalGroup,
+                playerGroup
+            );
+
+            Function.Call(
+                Hash.SET_RELATIONSHIP_BETWEEN_GROUPS,
+                5,
+                playerGroup,
+                wildAnimalGroup
+            );
+
+            Function.Call(
+                Hash.SET_GLOBAL_MIN_BIRD_FLIGHT_HEIGHT,
+                10f
+            );
+
+            Vector3 flockOrigin =
+                GameplayCamera.Position +
+                (GameplayCamera.Direction * 6f) +
+                new Vector3(0f, 0f, 0.5f);
+
+            for (int i = 0; i < birdCount; i++)
+            {
+                float spreadAngle =
+                    -25f +
+                    ((float)_random.NextDouble() * 50f);
+
+                Vector3 flightDirection =
+                    RotateAroundZ(
+                        GameplayCamera.Direction,
+                        spreadAngle
+                    );
+
+                float horizontalOffset =
+                    0.25f +
+                    ((float)_random.NextDouble() * 1.25f);
+
+                float heightOffset =
+                    -0.5f +
+                    ((float)_random.NextDouble() * 1.5f);
+
+                Vector3 spawnPosition =
+                    flockOrigin +
+                    new Vector3(
+                        flightDirection.X * horizontalOffset,
+                        flightDirection.Y * horizontalOffset,
+                        heightOffset
+                    );
+
+                float heading =
+                    (float)(
+                        Math.Atan2(
+                            -flightDirection.X,
+                            flightDirection.Y
+                        ) *
+                        (180.0 / Math.PI)
+                    );
+
+                Ped bird = World.CreatePed(
+                    birdModel,
+                    spawnPosition,
+                    heading
+                );
+
+                if (bird == null || !bird.Exists())
+                {
+                    continue;
+                }
+
+                Function.Call(
+                    Hash.SET_PED_RELATIONSHIP_GROUP_HASH,
+                    bird.Handle,
+                    wildAnimalGroup
+                );
+
+                bird.AlwaysKeepTask = true;
+
+                bird.Task.ReactAndFlee(
+                    Game.Player.Character
+                );
+
+                float launchSpeed =
+                    7f +
+                    ((float)_random.NextDouble() * 5f);
+
+                float upwardSpeed =
+                    2f +
+                    ((float)_random.NextDouble() * 2f);
+
+                bird.Velocity =
+                    (flightDirection * launchSpeed) +
+                    new Vector3(
+                        0f,
+                        0f,
+                        upwardSpeed
+                    );
+
+                bird.MarkAsNoLongerNeeded();
+            }
+
+            birdModel.MarkAsNoLongerNeeded();
+        }  
+    
+    
     }
 }   

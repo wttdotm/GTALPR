@@ -1,0 +1,474 @@
+[
+    {
+      "FlockCameraId": "manual/custom-1787458951752",
+      "osmType": "manual",
+      "osmId": 69696969696969,
+      "X": -20.402,
+      "Y": -1606.617,
+      "Heading": 0
+    },
+    {
+      "FlockCameraId": "node/12732032796",
+      "osmType": "node",
+      "osmId": 12732032796,
+      "X": -1648.984,
+      "Y": -608.27,
+      "Heading": 342
+    },
+    {
+      "FlockCameraId": "node/12732032797",
+      "osmType": "node",
+      "osmId": 12732032797,
+      "X": -1438.983,
+      "Y": -782.753,
+      "Heading": 15
+    },
+    {
+      "FlockCameraId": "node/12732032798",
+      "osmType": "node",
+      "osmId": 12732032798,
+      "X": -1245.78,
+      "Y": -1035.632,
+      "Heading": 324
+    },
+    {
+      "FlockCameraId": "node/12732032799",
+      "osmType": "node",
+      "osmId": 12732032799,
+      "X": -1322.473,
+      "Y": -662.699,
+      "Heading": 75
+    },
+    {
+      "FlockCameraId": "node/12732047301",
+      "osmType": "node",
+      "osmId": 12732047301,
+      "X": -647.837,
+      "Y": -676.015,
+      "Heading": 20
+    },
+    {
+      "FlockCameraId": "node/12766805713",
+      "osmType": "node",
+      "osmId": 12766805713,
+      "X": -1347.283,
+      "Y": 218.417,
+      "Heading": 245
+    },
+    {
+      "FlockCameraId": "node/12766805714",
+      "osmType": "node",
+      "osmId": 12766805714,
+      "X": -1073.731,
+      "Y": 268.556,
+      "Heading": 270
+    },
+    {
+      "FlockCameraId": "node/12981362152",
+      "osmType": "node",
+      "osmId": 12981362152,
+      "X": -0.445,
+      "Y": -2059.255,
+      "Heading": 355
+    },
+    {
+      "FlockCameraId": "node/12981362155",
+      "osmType": "node",
+      "osmId": 12981362155,
+      "X": -99.072,
+      "Y": -1749.357,
+      "Heading": 338
+    },
+    {
+      "FlockCameraId": "node/12986651926",
+      "osmType": "node",
+      "osmId": 12986651926,
+      "X": -1534.799,
+      "Y": -699.299,
+      "Heading": 340
+    },
+    {
+      "FlockCameraId": "node/12986651927",
+      "osmType": "node",
+      "osmId": 12986651927,
+      "X": -1378.01,
+      "Y": -578.6,
+      "Heading": 343
+    },
+    {
+      "FlockCameraId": "node/13000932806",
+      "osmType": "node",
+      "osmId": 13000932806,
+      "X": 167.883,
+      "Y": -1794.421,
+      "Heading": 34
+    },
+    {
+      "FlockCameraId": "node/13027425143",
+      "osmType": "node",
+      "osmId": 13027425143,
+      "X": -250.219,
+      "Y": -1846.045,
+      "Heading": 11
+    },
+    {
+      "FlockCameraId": "node/13178159060",
+      "osmType": "node",
+      "osmId": 13178159060,
+      "X": -412.087,
+      "Y": -1865.747,
+      "Heading": 5
+    },
+    {
+      "FlockCameraId": "node/13274461712",
+      "osmType": "node",
+      "osmId": 13274461712,
+      "X": -1362.726,
+      "Y": -840.641,
+      "Heading": 100
+    },
+    {
+      "FlockCameraId": "node/13438905001",
+      "osmType": "node",
+      "osmId": 13438905001,
+      "X": -401.642,
+      "Y": -959.073,
+      "Heading": 1
+    },
+    {
+      "FlockCameraId": "node/13545004601",
+      "osmType": "node",
+      "osmId": 13545004601,
+      "X": -981.472,
+      "Y": -238.731,
+      "Heading": 353
+    },
+    {
+      "FlockCameraId": "node/13588929401",
+      "osmType": "node",
+      "osmId": 13588929401,
+      "X": -1965.615,
+      "Y": 516.469,
+      "Heading": 74
+    },
+    {
+      "FlockCameraId": "node/13591838788",
+      "osmType": "node",
+      "osmId": 13591838788,
+      "X": -911.866,
+      "Y": -2092.869,
+      "Heading": 175
+    },
+    {
+      "FlockCameraId": "node/13649027301",
+      "osmType": "node",
+      "osmId": 13649027301,
+      "X": 1027.905,
+      "Y": -215.466,
+      "Heading": 68
+    },
+    {
+      "FlockCameraId": "node/13680913101",
+      "osmType": "node",
+      "osmId": 13680913101,
+      "X": 147.057,
+      "Y": -1587.749,
+      "Heading": 323
+    },
+    {
+      "FlockCameraId": "node/13714820396",
+      "osmType": "node",
+      "osmId": 13714820396,
+      "X": -401.187,
+      "Y": -1392.634,
+      "Heading": 0
+    },
+    {
+      "FlockCameraId": "node/13726091001",
+      "osmType": "node",
+      "osmId": 13726091001,
+      "X": -1276.649,
+      "Y": -362.107,
+      "Heading": 316
+    },
+    {
+      "FlockCameraId": "node/13726099901",
+      "osmType": "node",
+      "osmId": 13726099901,
+      "X": -1447.947,
+      "Y": -462.519,
+      "Heading": 326
+    },
+    {
+      "FlockCameraId": "node/13726115101",
+      "osmType": "node",
+      "osmId": 13726115101,
+      "X": -479.896,
+      "Y": -41.319,
+      "Heading": 6
+    },
+    {
+      "FlockCameraId": "node/13736280601",
+      "osmType": "node",
+      "osmId": 13736280601,
+      "X": 22.569,
+      "Y": 251.23,
+      "Heading": 30
+    },
+    {
+      "FlockCameraId": "node/13738747401",
+      "osmType": "node",
+      "osmId": 13738747401,
+      "X": 1307.193,
+      "Y": -2482.164,
+      "Heading": 13
+    },
+    {
+      "FlockCameraId": "node/13738751001",
+      "osmType": "node",
+      "osmId": 13738751001,
+      "X": 1037.986,
+      "Y": -2467.97,
+      "Heading": 8
+    },
+    {
+      "FlockCameraId": "node/13738754301",
+      "osmType": "node",
+      "osmId": 13738754301,
+      "X": 1353.95,
+      "Y": -1622.455,
+      "Heading": 242
+    },
+    {
+      "FlockCameraId": "node/13743963302",
+      "osmType": "node",
+      "osmId": 13743963302,
+      "X": -32.497,
+      "Y": -1457.905,
+      "Heading": 173
+    },
+    {
+      "FlockCameraId": "node/13746399101",
+      "osmType": "node",
+      "osmId": 13746399101,
+      "X": -110.467,
+      "Y": -1560.922,
+      "Heading": 42
+    },
+    {
+      "FlockCameraId": "node/13772974902",
+      "osmType": "node",
+      "osmId": 13772974902,
+      "X": 492.823,
+      "Y": 82.689,
+      "Heading": 108
+    },
+    {
+      "FlockCameraId": "node/13799936502",
+      "osmType": "node",
+      "osmId": 13799936502,
+      "X": -1722.49,
+      "Y": 91.374,
+      "Heading": 77
+    },
+    {
+      "FlockCameraId": "node/13799946302",
+      "osmType": "node",
+      "osmId": 13799946302,
+      "X": -1408.78,
+      "Y": 618.835,
+      "Heading": 82
+    },
+    {
+      "FlockCameraId": "node/13799947001",
+      "osmType": "node",
+      "osmId": 13799947001,
+      "X": -1834.802,
+      "Y": 491.729,
+      "Heading": 246
+    },
+    {
+      "FlockCameraId": "node/13874629701",
+      "osmType": "node",
+      "osmId": 13874629701,
+      "X": -1009.311,
+      "Y": -1120.641,
+      "Heading": 200
+    },
+    {
+      "FlockCameraId": "node/13920728402",
+      "osmType": "node",
+      "osmId": 13920728402,
+      "X": -1010.287,
+      "Y": -1603.854,
+      "Heading": 147
+    },
+    {
+      "FlockCameraId": "node/13920736601",
+      "osmType": "node",
+      "osmId": 13920736601,
+      "X": -1035.915,
+      "Y": -1550.152,
+      "Heading": 338
+    },
+    {
+      "FlockCameraId": "node/13936963301",
+      "osmType": "node",
+      "osmId": 13936963301,
+      "X": -1684.439,
+      "Y": -340.803,
+      "Heading": 204
+    },
+    {
+      "FlockCameraId": "node/13936976901",
+      "osmType": "node",
+      "osmId": 13936976901,
+      "X": 1159.597,
+      "Y": -863.771,
+      "Heading": 187
+    },
+    {
+      "FlockCameraId": "node/13936976902",
+      "osmType": "node",
+      "osmId": 13936976902,
+      "X": -1425.038,
+      "Y": 492.234,
+      "Heading": 9
+    },
+    {
+      "FlockCameraId": "node/13963537528",
+      "osmType": "node",
+      "osmId": 13963537528,
+      "X": 1167.278,
+      "Y": -517.221,
+      "Heading": 195
+    },
+    {
+      "FlockCameraId": "node/13991290302",
+      "osmType": "node",
+      "osmId": 13991290302,
+      "X": -1073.072,
+      "Y": -1032.528,
+      "Heading": 300
+    },
+    {
+      "FlockCameraId": "node/13991291301",
+      "osmType": "node",
+      "osmId": 13991291301,
+      "X": -1172.929,
+      "Y": -823.719,
+      "Heading": 136
+    },
+    {
+      "FlockCameraId": "node/14024838201",
+      "osmType": "node",
+      "osmId": 14024838201,
+      "X": 726.327,
+      "Y": -3.14,
+      "Heading": 104
+    },
+    {
+      "FlockCameraId": "node/14040117401",
+      "osmType": "node",
+      "osmId": 14040117401,
+      "X": -393.685,
+      "Y": 239.304,
+      "Heading": 84
+    },
+    {
+      "FlockCameraId": "node/14040118701",
+      "osmType": "node",
+      "osmId": 14040118701,
+      "X": -125.552,
+      "Y": 248.973,
+      "Heading": 341
+    },
+    {
+      "FlockCameraId": "node/14045112401",
+      "osmType": "node",
+      "osmId": 14045112401,
+      "X": 1273.818,
+      "Y": -2044.36,
+      "Heading": 225
+    },
+    {
+      "FlockCameraId": "node/14045114801",
+      "osmType": "node",
+      "osmId": 14045114801,
+      "X": 1254.547,
+      "Y": -1459.207,
+      "Heading": 356
+    },
+    {
+      "FlockCameraId": "node/14045119101",
+      "osmType": "node",
+      "osmId": 14045119101,
+      "X": 1234.02,
+      "Y": -1411.505,
+      "Heading": 157
+    },
+    {
+      "FlockCameraId": "node/14059885901",
+      "osmType": "node",
+      "osmId": 14059885901,
+      "X": -986.519,
+      "Y": -849.813,
+      "Heading": 14
+    },
+    {
+      "FlockCameraId": "node/14065057002",
+      "osmType": "node",
+      "osmId": 14065057002,
+      "X": -782.697,
+      "Y": 595.46,
+      "Heading": 71
+    },
+    {
+      "FlockCameraId": "node/14065058803",
+      "osmType": "node",
+      "osmId": 14065058803,
+      "X": -1583.754,
+      "Y": -186.33,
+      "Heading": 90
+    },
+    {
+      "FlockCameraId": "node/14065341801",
+      "osmType": "node",
+      "osmId": 14065341801,
+      "X": -1390.184,
+      "Y": -40.797,
+      "Heading": 174
+    },
+    {
+      "FlockCameraId": "node/14066999401",
+      "osmType": "node",
+      "osmId": 14066999401,
+      "X": -1229.041,
+      "Y": -1141.576,
+      "Heading": 0
+    },
+    {
+      "FlockCameraId": "node/14067041002",
+      "osmType": "node",
+      "osmId": 14067041002,
+      "X": -1263.37,
+      "Y": -1468.166,
+      "Heading": 339
+    },
+    {
+      "FlockCameraId": "node/14084444001",
+      "osmType": "node",
+      "osmId": 14084444001,
+      "X": 492.434,
+      "Y": -1116.717,
+      "Heading": 0
+    },
+    {
+      "FlockCameraId": "node/14104300302",
+      "osmType": "node",
+      "osmId": 14104300302,
+      "X": 180.402,
+      "Y": 197.472,
+      "Heading": 104
+    }
+  ]
