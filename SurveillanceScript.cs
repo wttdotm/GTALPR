@@ -103,6 +103,10 @@ namespace FlockSurveillance
         private Blip _cameraBlip;
         private Blip _cameraConeBlip;
 
+        private const float CameraBlipBaseScale = 1.65f;    
+        private const float CameraBlipPulseAmount = 0.25f;
+        private const float CameraBlipPulseCyclesPerSecond = 1.75f;
+
         public SurveillanceScript()
         {
             Tick += OnTick;
@@ -1181,7 +1185,7 @@ namespace FlockSurveillance
                 BlipColor.Red;
 
             camera.CameraBlip.Scale =
-                1.65f;
+                CameraBlipBaseScale;
 
             camera.CameraBlip.Name =
                 "Flock Camera";
@@ -1194,6 +1198,41 @@ namespace FlockSurveillance
                     (int)camera.Definition.Heading +
                     180
                 ) % 360;
+        }
+
+        private static void UpdateCameraBlipPulse(
+            ActiveCamera camera,
+            bool playerInsideFov
+        )
+        {
+            if (
+                camera.CameraBlip == null ||
+                !camera.CameraBlip.Exists()
+            )
+            {
+                return;
+            }
+
+            if (!playerInsideFov)
+            {
+                camera.CameraBlip.Scale = CameraBlipBaseScale;
+                return;
+            }
+
+            float timeSeconds = Game.GameTime / 1000f;
+
+            float pulse =
+                0.5f +
+                (0.5f * (float)Math.Sin(
+                    timeSeconds *
+                    CameraBlipPulseCyclesPerSecond *
+                    Math.PI *
+                    2.0
+                ));
+
+            camera.CameraBlip.Scale =
+                CameraBlipBaseScale +
+                (CameraBlipPulseAmount * pulse);
         }
 
         private void DrawNearbyCameraFieldsOfView()
@@ -1222,6 +1261,8 @@ namespace FlockSurveillance
                         camera,
                         playerVehicle
                     );
+
+                UpdateCameraBlipPulse(camera, vehicleInsideFov);
 
                 bool hasLineOfSight =
                     vehicleInsideFov &&
@@ -1294,7 +1335,7 @@ namespace FlockSurveillance
                 if (
                     isNewSighting &&
                     Game.Player.WantedLevel == 0 &&
-                    _random.NextDouble() < 0.25
+                    _random.NextDouble() < 0.05
                 )
                 {
                     Game.Player.WantedLevel =
