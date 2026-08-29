@@ -2,6 +2,22 @@
   "version": 4,
   "targets": {
     "net48": {
+      "LemonUI.SHVDN3/2.2.0": {
+        "type": "package",
+        "dependencies": {
+          "ScriptHookVDotNet3": "3.6.0"
+        },
+        "compile": {
+          "lib/net48/LemonUI.SHVDN3.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net48/LemonUI.SHVDN3.dll": {
+            "related": ".xml"
+          }
+        }
+      },
       "ScriptHookVDotNet3/3.6.0": {
         "type": "package",
         "compile": {
@@ -18,6 +34,21 @@
     }
   },
   "libraries": {
+    "LemonUI.SHVDN3/2.2.0": {
+      "sha512": "o7kmozBH0AgRe8OboECC8rxX8Vr7GHpV3BiWmJPZdygquEUjMafjyZbAU2WpZpTx1aYm21tNyI/r5nsECtVXaQ==",
+      "type": "package",
+      "path": "lemonui.shvdn3/2.2.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "lemonui.shvdn3.2.2.0.nupkg.sha512",
+        "lemonui.shvdn3.nuspec",
+        "lib/net48/LemonUI.SHVDN3.dll",
+        "lib/net48/LemonUI.SHVDN3.xml",
+        "logo.png"
+      ]
+    },
     "ScriptHookVDotNet3/3.6.0": {
       "sha512": "YccOvaMnHtFsWuGaZoi2Q/HFj8yyjNBN3b18pvcYYF4JcbjZxR1+I319qaMxRsvW1+iCbBZareQaeq6OpUHotw==",
       "type": "package",
@@ -34,6 +65,7 @@
   },
   "projectFileDependencyGroups": {
     "net48": [
+      "LemonUI.SHVDN3 >= 2.2.0",
       "ScriptHookVDotNet3 >= 3.6.0"
     ]
   },
@@ -82,6 +114,10 @@
         "framework": "net48",
         "targetAlias": "net48",
         "dependencies": {
+          "LemonUI.SHVDN3": {
+            "target": "Package",
+            "version": "[2.2.0, )"
+          },
           "ScriptHookVDotNet3": {
             "include": "Compile, Build, Native, ContentFiles, Analyzers, BuildTransitive",
             "suppressParent": "All",

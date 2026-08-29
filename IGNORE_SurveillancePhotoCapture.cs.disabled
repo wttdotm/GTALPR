@@ -1,0 +1,1054 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Globalization;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
+using GTA;
+using GTA.Math;
+using GTA.Native;
+
+namespace FlockSurveillance
+{
+    /// <summary>
+    /// Queues surveillance photos and captures each one by rendering a scripted
+    /// camera for one frame. Call Tick() before any other per-frame script work.
+    /// When it returns true, the caller should return from its tick so no script
+    /// graphics are drawn into the surveillance photo. Tick(), TakeImage(), and
+    /// Dispose() must all be called from the parent SHVDN script thread.
+    /// </summary>
+    internal sealed class SurveillancePhotoCapture : IDisposable
+    {
+        private const float DefaultPhotoFieldOfViewDegrees = 50f;
+        private const long DefaultJpegQuality = 90L;
+        private const int MaximumQueuedPhotos = 16;
+        private const int MaximumFramesWaitingForEncoding = 4;
+        private const int CaptureFrameTimeoutMilliseconds = 1000;
+
+        private readonly Queue<PhotoRequest> _requests =
+            new Queue<PhotoRequest>();
+
+        private readonly BlockingCollection<CapturedFrame> _framesToEncode =
+            new BlockingCollection<CapturedFrame>(
+                MaximumFramesWaitingForEncoding
+            );
+
+        private readonly Thread _encoderThread;
+        private readonly object _errorLogLock = new object();
+        private readonly string _outputDirectory;
+        private readonly float _defaultFieldOfView;
+        private readonly long _jpegQuality;
+
+        private CaptureState _state;
+        private Camera _photoCamera;
+        private Camera _previousRenderingCamera;
+        private PhotoRequest _activeRequest;
+        private int _activationFrame;
+        private int _restoredFrame;
+        private long _activationTimestamp;
+        private long _nextSequence;
+        private string _lastError;
+        private bool _ownsRenderingCamera;
+        private bool _disposed;
+
+        public SurveillancePhotoCapture()
+            : this(
+                BuildDefaultOutputDirectory(),
+                DefaultPhotoFieldOfViewDegrees,
+                DefaultJpegQuality
+            )
+        {
+        }
+
+        public SurveillancePhotoCapture(
+            string outputDirectory,
+            float defaultFieldOfView,
+            long jpegQuality
+        )
+        {
+            if (string.IsNullOrWhiteSpace(outputDirectory))
+            {
+                throw new ArgumentException(
+                    "A photo output directory is required.",
+                    nameof(outputDirectory)
+                );
+            }
+
+            _outputDirectory = Path.GetFullPath(outputDirectory);
+            _defaultFieldOfView = ClampFieldOfView(defaultFieldOfView);
+            _jpegQuality = Math.Max(1L, Math.Min(100L, jpegQuality));
+
+            _encoderThread = new Thread(EncodeFrames)
+            {
+                IsBackground = true,
+                Name = "Flock surveillance JPEG encoder"
+            };
+
+            _encoderThread.Start();
+        }
+
+        public string OutputDirectory => _outputDirectory;
+
+        public string LastError => Volatile.Read(ref _lastError);
+
+        public int QueuedPhotoCount =>
+            _requests.Count + (_activeRequest == null ? 0 : 1);
+
+        /// <summary>
+        /// Advances the one-frame camera state machine.
+        /// </summary>
+        /// <returns>
+        /// True only while the surveillance camera must own the upcoming render
+        /// frame. The calling script should immediately return from its tick.
+        /// </returns>
+        public bool Tick()
+        {
+            if (_disposed)
+            {
+                return false;
+            }
+
+            if (_state == CaptureState.WaitingForPhotoFrame)
+            {
+                if (Game.FrameCount <= _activationFrame)
+                {
+                    if (HasCaptureFrameTimedOut())
+                    {
+                        RecordError(
+                            "Timed out waiting for GTA to render the surveillance camera."
+                        );
+
+                        RestorePreviousCamera();
+                        FinishActiveRequestWithoutImage();
+                        return false;
+                    }
+
+                    HideGameHudForThisFrame();
+                    return true;
+                }
+
+                CaptureRenderedFrame();
+                return false;
+            }
+
+            if (_state == CaptureState.WaitingForGameplayFrame)
+            {
+                if (Game.FrameCount <= _restoredFrame)
+                {
+                    return false;
+                }
+
+                _state = CaptureState.Idle;
+            }
+
+            if (
+                _state == CaptureState.Idle &&
+                _requests.Count > 0
+            )
+            {
+                // Do not interrupt a mission, cutscene, or another mod that is
+                // already using a scripted camera.
+                if (
+                    !GameplayCamera.IsRendering ||
+                    !CanCaptureForegroundGameClientArea()
+                )
+                {
+                    return false;
+                }
+
+                return TryBeginNextPhoto();
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Queues a JPG taken at cameraLocation and centered on playerLocation.
+        /// </summary>
+        public bool TakeImage(
+            Vector3 cameraLocation,
+            Vector3 playerLocation
+        )
+        {
+            return TakeImage(
+                "camera",
+                cameraLocation,
+                playerLocation,
+                _defaultFieldOfView
+            );
+        }
+
+        /// <summary>
+        /// Queues a JPG and includes cameraId in its filename.
+        /// </summary>
+        public bool TakeImage(
+            string cameraId,
+            Vector3 cameraLocation,
+            Vector3 playerLocation
+        )
+        {
+            return TakeImage(
+                cameraId,
+                cameraLocation,
+                playerLocation,
+                _defaultFieldOfView
+            );
+        }
+
+        public bool TakeImage(
+            string cameraId,
+            Vector3 cameraLocation,
+            Vector3 playerLocation,
+            float fieldOfView
+        )
+        {
+            if (_disposed)
+            {
+                return false;
+            }
+
+            if (
+                !IsFinite(cameraLocation) ||
+                !IsFinite(playerLocation)
+            )
+            {
+                RecordError(
+                    "Ignored a surveillance photo with invalid world coordinates."
+                );
+                return false;
+            }
+
+            if (LocationsAreEffectivelyEqual(
+                cameraLocation,
+                playerLocation
+            ))
+            {
+                RecordError(
+                    "Ignored a surveillance photo whose camera and target positions were identical."
+                );
+                return false;
+            }
+
+            if (QueuedPhotoCount >= MaximumQueuedPhotos)
+            {
+                RecordError(
+                    "The surveillance photo queue is full; the newest request was dropped."
+                );
+                return false;
+            }
+
+            long sequence = Interlocked.Increment(ref _nextSequence);
+            DateTime requestedAtUtc = DateTime.UtcNow;
+            string safeCameraId = SanitizeCameraId(cameraId);
+            string fileName = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}_{1}_{2:D6}.jpg",
+                requestedAtUtc.ToString(
+                    "yyyyMMdd'T'HHmmss.fff'Z'",
+                    CultureInfo.InvariantCulture
+                ),
+                safeCameraId,
+                sequence
+            );
+
+            _requests.Enqueue(
+                new PhotoRequest(
+                    cameraLocation,
+                    playerLocation,
+                    ClampFieldOfView(fieldOfView),
+                    Path.Combine(_outputDirectory, fileName)
+                )
+            );
+
+            return true;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _requests.Clear();
+
+            try
+            {
+                RestorePreviousCamera();
+            }
+            catch
+            {
+                // Cleanup must never prevent the parent script from aborting.
+            }
+
+            _activeRequest = null;
+
+            if (_photoCamera != null)
+            {
+                try
+                {
+                    if (_photoCamera.Exists())
+                    {
+                        _photoCamera.Delete();
+                    }
+                }
+                catch
+                {
+                    // The game may already be shutting down.
+                }
+
+                _photoCamera = null;
+            }
+
+            _state = CaptureState.Disposed;
+            _framesToEncode.CompleteAdding();
+
+            if (
+                Thread.CurrentThread != _encoderThread &&
+                !_encoderThread.Join(2000)
+            )
+            {
+                RecordError(
+                    "The JPEG encoder did not finish before capture shutdown."
+                );
+            }
+
+            CapturedFrame remainingFrame;
+            while (_framesToEncode.TryTake(out remainingFrame))
+            {
+                remainingFrame.Bitmap.Dispose();
+            }
+        }
+
+        private bool TryBeginNextPhoto()
+        {
+            _activeRequest = _requests.Dequeue();
+
+            try
+            {
+                EnsurePhotoCamera();
+
+                _previousRenderingCamera = World.RenderingCamera;
+                _photoCamera.Position = _activeRequest.CameraLocation;
+                _photoCamera.FieldOfView = _activeRequest.FieldOfView;
+                _photoCamera.PointAt(_activeRequest.PlayerLocation);
+
+                _ownsRenderingCamera = true;
+                World.RenderingCamera = _photoCamera;
+
+                if (!IsPhotoCameraRendering())
+                {
+                    throw new InvalidOperationException(
+                        "GTA did not activate the surveillance photo camera."
+                    );
+                }
+
+                _activationFrame = Game.FrameCount;
+                _activationTimestamp = Stopwatch.GetTimestamp();
+                _state = CaptureState.WaitingForPhotoFrame;
+
+                HideGameHudForThisFrame();
+                return true;
+            }
+            catch (Exception exception)
+            {
+                RecordError(
+                    "Could not activate the surveillance photo camera.",
+                    exception
+                );
+
+                RestorePreviousCamera();
+                FinishActiveRequestWithoutImage();
+                return false;
+            }
+        }
+
+        private void EnsurePhotoCamera()
+        {
+            if (
+                _photoCamera != null &&
+                _photoCamera.Exists()
+            )
+            {
+                return;
+            }
+
+            _photoCamera = World.CreateCamera(
+                Vector3.Zero,
+                Vector3.Zero,
+                _defaultFieldOfView
+            );
+
+            if (_photoCamera == null || !_photoCamera.Exists())
+            {
+                _photoCamera = null;
+                throw new InvalidOperationException(
+                    "GTA did not create the scripted photo camera."
+                );
+            }
+        }
+
+        private void CaptureRenderedFrame()
+        {
+            Bitmap bitmap = null;
+
+            try
+            {
+                if (!IsPhotoCameraRendering())
+                {
+                    throw new InvalidOperationException(
+                        "Another script replaced the surveillance photo camera before capture."
+                    );
+                }
+
+                bitmap = CaptureForegroundGameClientArea();
+            }
+            catch (Exception exception)
+            {
+                RecordError(
+                    "Could not copy the rendered surveillance frame.",
+                    exception
+                );
+            }
+            finally
+            {
+                RestorePreviousCamera();
+                _restoredFrame = Game.FrameCount;
+                _state = CaptureState.WaitingForGameplayFrame;
+            }
+
+            if (bitmap != null)
+            {
+                CapturedFrame frame = new CapturedFrame(
+                    bitmap,
+                    _activeRequest.OutputPath
+                );
+
+                if (!_framesToEncode.TryAdd(frame))
+                {
+                    bitmap.Dispose();
+                    RecordError(
+                        "The JPEG encoder is behind; a captured frame was dropped."
+                    );
+                }
+            }
+
+            _activeRequest = null;
+        }
+
+        private void RestorePreviousCamera()
+        {
+            bool shouldRestore = _ownsRenderingCamera;
+
+            if (shouldRestore)
+            {
+                try
+                {
+                    shouldRestore = IsPhotoCameraRendering();
+                }
+                catch
+                {
+                    // If ownership cannot be proven, do not overwrite a camera
+                    // that a mission or another mod may have activated.
+                    shouldRestore = false;
+                }
+            }
+
+            if (shouldRestore)
+            {
+                try
+                {
+                    if (
+                        _previousRenderingCamera != null &&
+                        _previousRenderingCamera.Handle != 0 &&
+                        _previousRenderingCamera.Exists() &&
+                        (
+                            _photoCamera == null ||
+                            _previousRenderingCamera.Handle !=
+                                _photoCamera.Handle
+                        )
+                    )
+                    {
+                        World.RenderingCamera =
+                            _previousRenderingCamera;
+                    }
+                    else
+                    {
+                        World.RenderingCamera = null;
+                    }
+                }
+                catch
+                {
+                    try
+                    {
+                        World.RenderingCamera = null;
+                    }
+                    catch
+                    {
+                        // GTA may already be shutting down.
+                    }
+                }
+            }
+
+            if (_photoCamera != null)
+            {
+                try
+                {
+                    if (_photoCamera.Exists())
+                    {
+                        _photoCamera.IsActive = false;
+                        _photoCamera.StopPointing();
+                    }
+                }
+                catch
+                {
+                    // The owned camera is deleted during Dispose().
+                }
+            }
+
+            _ownsRenderingCamera = false;
+            _previousRenderingCamera = null;
+        }
+
+        private bool IsPhotoCameraRendering()
+        {
+            if (!_ownsRenderingCamera || _photoCamera == null)
+            {
+                return false;
+            }
+
+            Camera currentRenderingCamera = World.RenderingCamera;
+
+            return
+                currentRenderingCamera != null &&
+                currentRenderingCamera.Handle == _photoCamera.Handle;
+        }
+
+        private void FinishActiveRequestWithoutImage()
+        {
+            _activeRequest = null;
+            _restoredFrame = Game.FrameCount;
+            _state = CaptureState.WaitingForGameplayFrame;
+        }
+
+        private bool HasCaptureFrameTimedOut()
+        {
+            long elapsedTicks =
+                Stopwatch.GetTimestamp() - _activationTimestamp;
+
+            double elapsedMilliseconds =
+                elapsedTicks * 1000.0 / Stopwatch.Frequency;
+
+            return elapsedMilliseconds >=
+                CaptureFrameTimeoutMilliseconds;
+        }
+
+        private static void HideGameHudForThisFrame()
+        {
+            Function.Call(Hash.HIDE_HUD_AND_RADAR_THIS_FRAME);
+            Function.Call(Hash.THEFEED_HIDE_THIS_FRAME);
+            Function.Call(Hash.HIDE_HELP_TEXT_THIS_FRAME);
+        }
+
+        private static bool CanCaptureForegroundGameClientArea()
+        {
+            IntPtr windowHandle = GetForegroundWindow();
+
+            if (
+                windowHandle == IntPtr.Zero ||
+                IsIconic(windowHandle)
+            )
+            {
+                return false;
+            }
+
+            uint windowProcessId;
+            GetWindowThreadProcessId(
+                windowHandle,
+                out windowProcessId
+            );
+
+            if (windowProcessId != (uint)Process.GetCurrentProcess().Id)
+            {
+                return false;
+            }
+
+            NativeRect clientRect;
+            return
+                GetClientRect(windowHandle, out clientRect) &&
+                clientRect.Right > clientRect.Left &&
+                clientRect.Bottom > clientRect.Top;
+        }
+
+        private static Bitmap CaptureForegroundGameClientArea()
+        {
+            IntPtr previousDpiContext = IntPtr.Zero;
+
+            try
+            {
+                try
+                {
+                    previousDpiContext = SetThreadDpiAwarenessContext(
+                        new IntPtr(-4)
+                    );
+                }
+                catch (EntryPointNotFoundException)
+                {
+                    // Older Windows versions can still use unvirtualized bounds.
+                }
+
+                return CaptureForegroundGameClientAreaCore();
+            }
+            finally
+            {
+                if (previousDpiContext != IntPtr.Zero)
+                {
+                    try
+                    {
+                        SetThreadDpiAwarenessContext(previousDpiContext);
+                    }
+                    catch (EntryPointNotFoundException)
+                    {
+                        // The entry point cannot disappear during this call.
+                    }
+                }
+            }
+        }
+
+        private static Bitmap CaptureForegroundGameClientAreaCore()
+        {
+            IntPtr windowHandle = GetForegroundWindow();
+
+            if (windowHandle == IntPtr.Zero)
+            {
+                throw new InvalidOperationException(
+                    "GTA did not have a foreground window."
+                );
+            }
+
+            if (IsIconic(windowHandle))
+            {
+                throw new InvalidOperationException(
+                    "GTA's window was minimized."
+                );
+            }
+
+            uint windowProcessId;
+            GetWindowThreadProcessId(
+                windowHandle,
+                out windowProcessId
+            );
+
+            if (windowProcessId != (uint)Process.GetCurrentProcess().Id)
+            {
+                throw new InvalidOperationException(
+                    "GTA was not the foreground application."
+                );
+            }
+
+            NativeRect clientRect;
+            if (!GetClientRect(windowHandle, out clientRect))
+            {
+                throw new InvalidOperationException(
+                    "Windows could not read GTA's client rectangle."
+                );
+            }
+
+            NativePoint topLeft = new NativePoint
+            {
+                X = clientRect.Left,
+                Y = clientRect.Top
+            };
+
+            NativePoint bottomRight = new NativePoint
+            {
+                X = clientRect.Right,
+                Y = clientRect.Bottom
+            };
+
+            if (
+                !ClientToScreen(windowHandle, ref topLeft) ||
+                !ClientToScreen(windowHandle, ref bottomRight)
+            )
+            {
+                throw new InvalidOperationException(
+                    "Windows could not locate GTA's client area on screen."
+                );
+            }
+
+            int width = bottomRight.X - topLeft.X;
+            int height = bottomRight.Y - topLeft.Y;
+
+            if (width <= 0 || height <= 0)
+            {
+                throw new InvalidOperationException(
+                    "GTA's client area had no capturable size."
+                );
+            }
+
+            Bitmap bitmap = new Bitmap(
+                width,
+                height,
+                PixelFormat.Format24bppRgb
+            );
+
+            try
+            {
+                using (Graphics graphics = Graphics.FromImage(bitmap))
+                {
+                    graphics.CopyFromScreen(
+                        topLeft.X,
+                        topLeft.Y,
+                        0,
+                        0,
+                        new Size(width, height),
+                        CopyPixelOperation.SourceCopy
+                    );
+                }
+
+                return bitmap;
+            }
+            catch
+            {
+                bitmap.Dispose();
+                throw;
+            }
+        }
+
+        private void EncodeFrames()
+        {
+            foreach (
+                CapturedFrame frame
+                in _framesToEncode.GetConsumingEnumerable()
+            )
+            {
+                try
+                {
+                    SaveJpegAtomically(
+                        frame.Bitmap,
+                        frame.OutputPath
+                    );
+                }
+                catch (Exception exception)
+                {
+                    RecordError(
+                        "Could not save a surveillance JPG.",
+                        exception
+                    );
+                }
+                finally
+                {
+                    frame.Bitmap.Dispose();
+                }
+            }
+        }
+
+        private void SaveJpegAtomically(
+            Bitmap bitmap,
+            string outputPath
+        )
+        {
+            string directory = Path.GetDirectoryName(outputPath);
+            Directory.CreateDirectory(directory);
+
+            string temporaryPath =
+                outputPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+
+            try
+            {
+                ImageCodecInfo jpegEncoder = FindJpegEncoder();
+
+                using (
+                    EncoderParameters parameters =
+                        new EncoderParameters(1)
+                )
+                {
+                    parameters.Param[0] = new EncoderParameter(
+                        System.Drawing.Imaging.Encoder.Quality,
+                        _jpegQuality
+                    );
+
+                    bitmap.Save(
+                        temporaryPath,
+                        jpegEncoder,
+                        parameters
+                    );
+                }
+
+                File.Move(temporaryPath, outputPath);
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    try
+                    {
+                        File.Delete(temporaryPath);
+                    }
+                    catch
+                    {
+                        // A stale temporary file is harmless and unique.
+                    }
+                }
+            }
+        }
+
+        private static ImageCodecInfo FindJpegEncoder()
+        {
+            foreach (
+                ImageCodecInfo encoder
+                in ImageCodecInfo.GetImageEncoders()
+            )
+            {
+                if (string.Equals(
+                    encoder.MimeType,
+                    "image/jpeg",
+                    StringComparison.OrdinalIgnoreCase
+                ))
+                {
+                    return encoder;
+                }
+            }
+
+            throw new InvalidOperationException(
+                "Windows did not provide a JPEG encoder."
+            );
+        }
+
+        private void RecordError(
+            string message,
+            Exception exception = null
+        )
+        {
+            string detail = exception == null
+                ? message
+                : message + " " + exception.Message;
+
+            Volatile.Write(ref _lastError, detail);
+
+            try
+            {
+                lock (_errorLogLock)
+                {
+                    Directory.CreateDirectory(_outputDirectory);
+
+                    File.AppendAllText(
+                        Path.Combine(
+                            _outputDirectory,
+                            "capture-errors.log"
+                        ),
+                        DateTime.UtcNow.ToString(
+                            "O",
+                            CultureInfo.InvariantCulture
+                        ) + " " + detail + Environment.NewLine
+                    );
+                }
+            }
+            catch
+            {
+                // Capture errors must never take down the gameplay script.
+            }
+        }
+
+        private static string BuildDefaultOutputDirectory()
+        {
+            string picturesDirectory =
+                Environment.GetFolderPath(
+                    Environment.SpecialFolder.MyPictures
+                );
+
+            if (string.IsNullOrWhiteSpace(picturesDirectory))
+            {
+                picturesDirectory =
+                    Environment.GetFolderPath(
+                        Environment.SpecialFolder.MyDocuments
+                    );
+            }
+
+            if (string.IsNullOrWhiteSpace(picturesDirectory))
+            {
+                picturesDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            }
+
+            return Path.Combine(
+                picturesDirectory,
+                "FlockSurveillance",
+                "Captures"
+            );
+        }
+
+        private static float ClampFieldOfView(float fieldOfView)
+        {
+            if (
+                float.IsNaN(fieldOfView) ||
+                float.IsInfinity(fieldOfView)
+            )
+            {
+                return DefaultPhotoFieldOfViewDegrees;
+            }
+
+            return Math.Max(10f, Math.Min(120f, fieldOfView));
+        }
+
+        private static bool IsFinite(Vector3 value)
+        {
+            return
+                !float.IsNaN(value.X) &&
+                !float.IsNaN(value.Y) &&
+                !float.IsNaN(value.Z) &&
+                !float.IsInfinity(value.X) &&
+                !float.IsInfinity(value.Y) &&
+                !float.IsInfinity(value.Z);
+        }
+
+        private static bool LocationsAreEffectivelyEqual(
+            Vector3 first,
+            Vector3 second
+        )
+        {
+            float offsetX = first.X - second.X;
+            float offsetY = first.Y - second.Y;
+            float offsetZ = first.Z - second.Z;
+
+            return
+                (offsetX * offsetX) +
+                (offsetY * offsetY) +
+                (offsetZ * offsetZ) < 0.0001f;
+        }
+
+        private static string SanitizeCameraId(string cameraId)
+        {
+            if (string.IsNullOrWhiteSpace(cameraId))
+            {
+                return "camera";
+            }
+
+            char[] characters = cameraId.Trim().ToCharArray();
+            char[] invalidCharacters = Path.GetInvalidFileNameChars();
+
+            for (int index = 0; index < characters.Length; index++)
+            {
+                if (
+                    Array.IndexOf(
+                        invalidCharacters,
+                        characters[index]
+                    ) >= 0 ||
+                    char.IsWhiteSpace(characters[index])
+                )
+                {
+                    characters[index] = '_';
+                }
+            }
+
+            string result = new string(characters);
+
+            if (result.Length > 80)
+            {
+                result = result.Substring(0, 80);
+            }
+
+            return result;
+        }
+
+        private enum CaptureState
+        {
+            Idle,
+            WaitingForPhotoFrame,
+            WaitingForGameplayFrame,
+            Disposed
+        }
+
+        private sealed class PhotoRequest
+        {
+            public PhotoRequest(
+                Vector3 cameraLocation,
+                Vector3 playerLocation,
+                float fieldOfView,
+                string outputPath
+            )
+            {
+                CameraLocation = cameraLocation;
+                PlayerLocation = playerLocation;
+                FieldOfView = fieldOfView;
+                OutputPath = outputPath;
+            }
+
+            public Vector3 CameraLocation { get; }
+
+            public Vector3 PlayerLocation { get; }
+
+            public float FieldOfView { get; }
+
+            public string OutputPath { get; }
+        }
+
+        private sealed class CapturedFrame
+        {
+            public CapturedFrame(
+                Bitmap bitmap,
+                string outputPath
+            )
+            {
+                Bitmap = bitmap;
+                OutputPath = outputPath;
+            }
+
+            public Bitmap Bitmap { get; }
+
+            public string OutputPath { get; }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativePoint
+        {
+            public int X;
+            public int Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeRect
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsIconic(IntPtr windowHandle);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SetThreadDpiAwarenessContext(
+            IntPtr dpiContext
+        );
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(
+            IntPtr windowHandle,
+            out uint processId
+        );
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetClientRect(
+            IntPtr windowHandle,
+            out NativeRect clientRect
+        );
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ClientToScreen(
+            IntPtr windowHandle,
+            ref NativePoint point
+        );
+    }
+}
