@@ -46,6 +46,10 @@
           "framework": "net48",
           "targetAlias": "net48",
           "dependencies": {
+            "LemonUI.SHVDN3": {
+              "target": "Package",
+              "version": "[2.2.0, )"
+            },
             "ScriptHookVDotNet3": {
               "include": "Compile, Build, Native, ContentFiles, Analyzers, BuildTransitive",
               "suppressParent": "All",

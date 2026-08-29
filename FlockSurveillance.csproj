@@ -14,5 +14,9 @@
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
+    <PackageReference
+        Include="LemonUI.SHVDN3"
+        Version="2.2.0"
+    />
   </ItemGroup>
 </Project>

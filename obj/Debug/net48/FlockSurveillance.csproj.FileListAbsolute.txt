@@ -8,3 +8,5 @@ C:\Users\morri\rand_git\flock_gta\obj\Debug\net48\FlockSurveillance.csproj.CoreC
 C:\Users\morri\rand_git\flock_gta\obj\Debug\net48\FlockSurveillance.dll
 C:\Users\morri\rand_git\flock_gta\obj\Debug\net48\FlockSurveillance.pdb
 C:\Users\morri\rand_git\flock_gta\obj\Debug\net48\FlockSurveillance.sourcelink.json
+C:\Users\morri\rand_git\flock_gta\bin\Debug\net48\LemonUI.SHVDN3.dll
+C:\Users\morri\rand_git\flock_gta\obj\Debug\net48\FlockSur.8C33F6AD.Up2Date

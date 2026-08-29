@@ -4,10 +4,15 @@ using System.Windows.Forms;
 using GTA;
 using GTA.Math;
 using GTA.Native;
+using GtaControl = GTA.Control;
+
+
 
 using System.Collections.Generic;
 using System.IO;
 using System.Web.Script.Serialization;
+using LemonUI;
+using LemonUI.Menus;
 
 
 ///TODO: make minimap FOV better
@@ -24,7 +29,12 @@ namespace FlockSurveillance
 
         private readonly Dictionary<string, ActiveCamera> _activeCameras =
             new Dictionary<string, ActiveCamera>();
-            
+
+        private readonly SurveillanceSceneRecorder _sceneRecorder =
+            new SurveillanceSceneRecorder();
+
+        private readonly SurveillancePhotoLab _photoLab =
+            new SurveillancePhotoLab();
 
         private const float CameraActivationDistanceMeters = 150f;
         private int _nextCameraStreamingCheck;
@@ -47,7 +57,7 @@ namespace FlockSurveillance
         private const float CameraPropHeadingOffsetDegrees = 245f;
         private const float CameraModelRotationAdjustmentDegrees =
             24f; //for flockfragment
-        
+
         // private const string CameraPropModel = "flock_camera_v3";
 
 
@@ -103,9 +113,85 @@ namespace FlockSurveillance
         private Blip _cameraBlip;
         private Blip _cameraConeBlip;
 
-        private const float CameraBlipBaseScale = 1.65f;    
+        private const float CameraBlipBaseScale = 1.65f;
         private const float CameraBlipPulseAmount = 0.25f;
         private const float CameraBlipPulseCyclesPerSecond = 1.75f;
+
+        //control panel stuff
+        private bool _showFovDebugGeometry;
+        private bool _cameraNetworkEnabled = true;
+
+        private readonly ObjectPool _controlPanelPool =
+            new ObjectPool();
+
+        private readonly NativeMenu _controlPanelMenu =
+            new NativeMenu(
+                "FLOCK SURVEILLANCE",
+                "CONTROL PANEL"
+            );
+
+        private readonly NativeCheckboxItem _showFovDebugItem =
+            new NativeCheckboxItem(
+                "Show FOV Debug Geometry",
+                "Shows camera FOV boundaries, centerlines, and sightlines.",
+                false
+            );
+
+        private readonly NativeCheckboxItem _cameraNetworkItem =
+            new NativeCheckboxItem(
+                "Camera Network Enabled",
+                "Controls detection, reports, sounds, photo recording, and blip pulsing. Physical cameras remain present.",
+                true
+            );
+
+        private readonly NativeItem _respawnAllCamerasItem =
+            new NativeItem(
+                "Respawn All Cameras",
+                "Restore destroyed cameras and rebuild nearby camera props."
+            );
+
+        //stats stuff
+        private readonly SurveillanceStatsStore _statsStore =
+            new SurveillanceStatsStore();
+
+        private SurveillanceStatsData _stats;
+
+        private bool _statsSaveErrorShown;
+
+        private readonly NativeMenu _statsMenu =
+            new NativeMenu(
+                "FLOCK SURVEILLANCE",
+                "STATISTICS"
+            );
+
+        private readonly NativeItem _totalDestroyedStat =
+            new NativeItem("Cameras Destroyed");
+
+        private readonly NativeItem _fastestTenStat =
+            new NativeItem("Fastest 10 Cameras");
+
+        private readonly NativeItem _fastestFiftyStat =
+            new NativeItem("Fastest 50 Cameras");
+
+        private readonly NativeItem _fastestAllStat =
+            new NativeItem("Fastest All Cameras");
+
+        private readonly NativeItem _policeReportsStat =
+            new NativeItem("Police Reports");
+
+        private readonly NativeItem _falseReportsStat =
+            new NativeItem("False Reports");
+
+        private readonly NativeItem _cameraSightingsStat =
+            new NativeItem("Camera Sightings");
+
+        private readonly NativeItem _photosRenderedStat =
+            new NativeItem("Photos Rendered");
+
+        private readonly NativeItem _photosWaitingStat =
+            new NativeItem("Photos Waiting");
+
+
 
         public SurveillanceScript()
         {
@@ -114,13 +200,78 @@ namespace FlockSurveillance
 
             Aborted += OnAborted;
 
+            _showFovDebugItem.CheckboxChanged +=
+                OnShowFovDebugChanged;
+
+            _cameraNetworkItem.CheckboxChanged +=
+                OnCameraNetworkChanged;
+
+            _respawnAllCamerasItem.Activated +=
+                OnRespawnAllCamerasActivated;
+
+            _controlPanelMenu.Add(_respawnAllCamerasItem);
+
+            _controlPanelMenu.Add(_showFovDebugItem);
+            _controlPanelMenu.Add(_cameraNetworkItem);
+
+            _controlPanelPool.Add(_controlPanelMenu);
+
+            _stats = _statsStore.Load();
+
+            _statsMenu.Add(_totalDestroyedStat);
+            _statsMenu.Add(_fastestTenStat);
+            _statsMenu.Add(_fastestFiftyStat);
+            _statsMenu.Add(_fastestAllStat);
+            _statsMenu.Add(_policeReportsStat);
+            _statsMenu.Add(_falseReportsStat);
+            _statsMenu.Add(_cameraSightingsStat);
+            _statsMenu.Add(_photosRenderedStat);
+            _statsMenu.Add(_photosWaitingStat);
+
+            _controlPanelMenu.AddSubMenu(
+                _statsMenu,
+                "VIEW"
+            );
+
+            _controlPanelPool.Add(_statsMenu);
+
+            _photoLab.PhotoGenerated += OnPhotoGenerated;
+
+            RefreshStatsMenu();
+
+            if (!string.IsNullOrWhiteSpace(_statsStore.LastError))
+            {
+                GTA.UI.Notification.Show(
+                    "~y~Flock stats could not be loaded.~s~ " +
+                    "New statistics were started."
+                );
+            }
+
             GTA.UI.Notification.Show(
                 "~g~Flock Surveillance loaded~s~. Press F6 to place a test camera."
             );
         }
         private void OnTick(object sender, EventArgs e)
         {
+            bool controllerShortcutTriggered =
+                TryToggleControlPanelFromController();
 
+            if (!controllerShortcutTriggered)
+            {
+
+                _controlPanelPool.Process();
+            }
+
+            if (_statsMenu.Visible)
+            {
+                RefreshStatsMenu();
+            }
+
+            _sceneRecorder.Tick();
+            if (_photoLab.Tick())
+            {
+                return;
+            }
             if (!_initialCameraLoadAttempted)
             {
                 _initialCameraLoadAttempted = true;
@@ -165,12 +316,22 @@ namespace FlockSurveillance
                 displayColor = Color.Lime;
             }
 
-            DrawHeadingLine(displayColor);
-            DrawFieldOfView(displayColor);
-
-            if (playerInsideFov)
+            if (_showFovDebugGeometry)
             {
-                DrawSightLine(displayColor);
+                DrawHeadingLine(displayColor);
+                DrawFieldOfView(displayColor);
+
+                if (playerInsideFov)
+                {
+                    DrawSightLine(displayColor);
+                }
+            }
+
+            if (!_cameraNetworkEnabled)
+            {
+                _wasSeeingPlayer = false;
+                _wasReportableSighting = false;
+                return;
             }
 
             Vehicle playerVehicle =
@@ -191,6 +352,15 @@ namespace FlockSurveillance
             if (isNewSighting)
             {
                 PlayPictureTakenSound();
+
+                _sceneRecorder.TryRecordSighting(
+                    "f6-test-camera",
+                    _cameraPosition +
+                        new Vector3(0f, 0f, CameraEyeHeightMeters),
+                    _cameraHeading,
+                    CameraFovDegrees,
+                    CameraRangeMeters
+                );
             }
 
             bool reportableSighting =
@@ -317,44 +487,46 @@ namespace FlockSurveillance
 
         private void OnKeyDown(object sender, KeyEventArgs e)
         {
-            
-            if (e.KeyCode == Keys.E)
+
+            if (
+                e.KeyCode == Keys.F7 &&
+                !_photoLab.IsBusy
+            )
             {
-                if (
-                    TryCollectNearbyLoot(
-                        ManualLootDistanceMeters
-                    )
-                )
-                {
-                    return;
-                }
+                ToggleControlPanel();
+                return;
             }
+
+            if (_controlPanelPool.AreAnyVisible)
+            {
+                return;
+            }
+            if (e.KeyCode == Keys.F3)
+            {
+                if (_photoLab.IsBusy)
+                {
+                    _photoLab.RequestCancel();
+                }
+                else if (!_photoLab.RequestLatestUnrenderedScene())
+                {
+                    GTA.UI.Notification.Show(
+                        "~r~Photo Lab~s~: " + _photoLab.LastError
+                    );
+                }
+
+                return;
+            }
+
+            if (_photoLab.IsBusy)
+            {
+                return;
+            }
+
 
 
             if (e.KeyCode == Keys.F12)
             {
                 ShowNearestActiveCameraDebug();
-                return;
-            }
-            if (e.KeyCode == Keys.F11)
-            {
-                ShowCurrentCameraCoordinates();
-                return;
-            }
-            if (e.KeyCode == Keys.F7)
-            {
-                ForceHiddenEvasion();
-                return;
-            }
-            if (e.KeyCode == Keys.F8)
-            {
-                GiveTestWantedLevel();
-                return;
-            }
-
-            if (e.KeyCode == Keys.F9)
-            {
-                ReportPlayerSpotted();
                 return;
             }
 
@@ -400,6 +572,7 @@ namespace FlockSurveillance
                 );
 
             _wasReportableSighting = false;
+            _wasSeeingPlayer = false;
 
 
             if (!CreateCameraProp())
@@ -616,7 +789,7 @@ namespace FlockSurveillance
                 color.A
             );
         }
-        
+
         private void CreateCameraBlip()
         {
             DeleteCameraBlip();
@@ -675,14 +848,16 @@ namespace FlockSurveillance
 
         private void OnAborted(object sender, EventArgs e)
         {
+            _photoLab.Dispose();
+            _sceneRecorder.Dispose();
             StopCameraAudio();
             DeleteCameraBlip();
             DeleteCameraProp();
             DeleteActiveCameras();
             DeleteLootDrops();
         }
-        
-        
+
+
         private bool CreateCameraProp()
         {
             Model model = new Model(CameraPropModel);
@@ -1009,7 +1184,7 @@ namespace FlockSurveillance
             }
         }
 
-        
+
         private void UpdateNearbyCameras()
         {
             if (Game.GameTime < _nextCameraStreamingCheck)
@@ -1246,14 +1421,15 @@ namespace FlockSurveillance
 
             bool sightingReportedThisTick = false;
 
-            foreach (ActiveCamera camera in _activeCameras.Values)
+            foreach (
+                ActiveCamera camera
+                in _activeCameras.Values
+            )
             {
-                //skip destroyed cameras
                 if (camera.Definition.IsDestroyed)
                 {
                     continue;
                 }
-
 
                 bool vehicleInsideFov =
                     playerIsInVehicle &&
@@ -1262,14 +1438,18 @@ namespace FlockSurveillance
                         playerVehicle
                     );
 
-                UpdateCameraBlipPulse(camera, vehicleInsideFov);
-
                 bool hasLineOfSight =
                     vehicleInsideFov &&
                     HasLineOfSightToVehicle(
                         camera,
                         playerVehicle
                     );
+
+                UpdateCameraBlipPulse(
+                    camera,
+                    _cameraNetworkEnabled &&
+                    vehicleInsideFov
+                );
 
                 Color displayColor;
 
@@ -1286,31 +1466,45 @@ namespace FlockSurveillance
                     displayColor = Color.Lime;
                 }
 
-                DrawFieldOfView(
-                    camera.Position,
-                    camera.FovEndpoints,
-                    displayColor
-                );
-
-                if (vehicleInsideFov)
+                if (_showFovDebugGeometry)
                 {
-                    Vector3 cameraEyePosition =
-                        camera.Position +
-                        new Vector3(
-                            0f,
-                            0f,
-                            CameraEyeHeightMeters
-                        );
-
-                    Vector3 vehicleTargetPosition =
-                        playerVehicle.Position +
-                        new Vector3(0f, 0f, 0.5f);
-
-                    DrawLine(
-                        cameraEyePosition,
-                        vehicleTargetPosition,
+                    DrawFieldOfView(
+                        camera.Position,
+                        camera.FovEndpoints,
                         displayColor
                     );
+
+                    if (vehicleInsideFov)
+                    {
+                        Vector3 cameraEyePosition =
+                            camera.Position +
+                            new Vector3(
+                                0f,
+                                0f,
+                                CameraEyeHeightMeters
+                            );
+
+                        Vector3 vehicleTargetPosition =
+                            playerVehicle.Position +
+                            new Vector3(
+                                0f,
+                                0f,
+                                0.5f
+                            );
+
+                        DrawLine(
+                            cameraEyePosition,
+                            vehicleTargetPosition,
+                            displayColor
+                        );
+                    }
+                }
+
+                if (!_cameraNetworkEnabled)
+                {
+                    camera.WasSeeingPlayer = false;
+                    camera.WasReportableSighting = false;
+                    continue;
                 }
 
                 bool cameraCanSeePlayer =
@@ -1330,6 +1524,19 @@ namespace FlockSurveillance
                 if (isNewSighting)
                 {
                     PlayPictureTakenSound();
+
+                    _sceneRecorder.TryRecordSighting(
+                        camera.Definition.FlockCameraId,
+                        camera.Position +
+                            new Vector3(
+                                0f,
+                                0f,
+                                CameraEyeHeightMeters
+                            ),
+                        camera.Definition.Heading,
+                        CameraFovDegrees,
+                        CameraRangeMeters
+                    );
                 }
 
                 if (
@@ -1466,8 +1673,8 @@ namespace FlockSurveillance
                 result.HitEntity.Exists() &&
                 result.HitEntity.Handle == vehicle.Handle;
         }
-        
-        
+
+
         private void DeleteActiveCamera(
             ActiveCamera camera
         )
@@ -1555,7 +1762,7 @@ namespace FlockSurveillance
                 $"Y: {nearestCamera.Position.Y:0.0} | " +
                 $"Z: {nearestCamera.Position.Z:0.0} | " +
                 $"Distance: {distance:0.0}m | " +
-                $"Prop exists: {propExists} | "+ 
+                $"Prop exists: {propExists} | " +
                 $"Stored Z: {nearestCamera.Position.Z:0.0} | " +
                 $"Live Z: {livePosition.Z:0.0} | " +
                 $"Player Z: {playerZ:0.0} | "
@@ -1650,7 +1857,7 @@ namespace FlockSurveillance
                 }
             }
         }
-        
+
         private void DestroyCamera(
             ActiveCamera camera
         )
@@ -1914,7 +2121,7 @@ namespace FlockSurveillance
                     "~g~Collected camera components~s~\n" +
                     "+3 Copper Scrap\n" +
                     "+2 Electronic Components\n" +
-                    "+1 Gold-Plated Contact\n" + 
+                    "+1 Gold-Plated Contact\n" +
                     "~g~+$500"
                 );
 
@@ -2101,7 +2308,7 @@ namespace FlockSurveillance
             }
 
             birdModel.MarkAsNoLongerNeeded();
-        }  
+        }
 
         //SOUND STUFF
 
@@ -2289,7 +2496,283 @@ namespace FlockSurveillance
         {
             _scheduledCameraAudioCues.Clear();
             StopWantedReportSound();
-        }  
-    
+        }
+
+        // Control panel stuff
+        private void OnShowFovDebugChanged(
+            object sender,
+            EventArgs e
+        )
+        {
+            _showFovDebugGeometry =
+                _showFovDebugItem.Checked;
+        }
+
+        private void OnCameraNetworkChanged(
+            object sender,
+            EventArgs e
+        )
+        {
+            _cameraNetworkEnabled =
+                _cameraNetworkItem.Checked;
+
+            if (!_cameraNetworkEnabled)
+            {
+                StopCameraAudio();
+                ResetCameraDetectionState();
+            }
+        }
+
+        private void ResetCameraDetectionState()
+        {
+            _wasSeeingPlayer = false;
+            _wasReportableSighting = false;
+
+            foreach (
+                ActiveCamera camera
+                in _activeCameras.Values
+            )
+            {
+                camera.WasSeeingPlayer = false;
+                camera.WasReportableSighting = false;
+
+                UpdateCameraBlipPulse(
+                    camera,
+                    false
+                );
+            }
+        }
+
+        private void ToggleControlPanel()
+        {
+            if (_controlPanelPool.AreAnyVisible)
+            {
+                _controlPanelPool.HideAll();
+            }
+            else
+            {
+                _controlPanelMenu.Visible = true;
+            }
+        }
+
+
+        private bool TryToggleControlPanelFromController()
+        {
+            if (
+                _photoLab.IsBusy ||
+                Game.IsPaused
+            )
+            {
+                return false;
+            }
+
+            bool rightBumperHeld =
+                Game.IsControlPressed(
+                    GtaControl.FrontendRb
+                );
+
+            bool xJustPressed =
+                Game.IsControlJustPressed(
+                    GtaControl.FrontendX
+                );
+
+            if (
+                !rightBumperHeld ||
+                !xJustPressed
+            )
+            {
+                return false;
+            }
+
+            Vehicle vehicle =
+                Game.Player.Character.CurrentVehicle;
+
+            bool movingVehicle =
+                vehicle != null &&
+                vehicle.Exists() &&
+                vehicle.Speed > 1f;
+
+            if (movingVehicle)
+            {
+                return false;
+            }
+
+            SuppressControlPanelChordActions();
+            ToggleControlPanel();
+
+            return true;
+        }
+
+        private static void SuppressControlPanelChordActions()
+        {
+            GtaControl[] conflictingControls =
+            {
+                GtaControl.Cover,
+                GtaControl.Jump,
+                GtaControl.MeleeBlock,
+                GtaControl.VehicleHandbrake,
+                GtaControl.VehicleAttack,
+                GtaControl.VehicleSelectNextWeapon,
+                GtaControl.VehicleJump
+            };
+
+            foreach (
+                GtaControl control
+                in conflictingControls
+            )
+            {
+                Function.Call(
+                    Hash.DISABLE_CONTROL_ACTION,
+                    0,
+                    (int)control,
+                    true
+                );
+            }
+        }
+
+        private void OnRespawnAllCamerasActivated(
+            object sender,
+            EventArgs e
+        )
+        {
+            RespawnAllCameras();
+        }
+
+        private void RespawnAllCameras()
+        {
+            int destroyedCameraCount = 0;
+
+            foreach (CameraDefinition definition in _cameraDefinitions)
+            {
+                if (definition.IsDestroyed)
+                {
+                    destroyedCameraCount++;
+                }
+            }
+
+            // Stop any sound and clear active detection/pulse state before
+            // deleting the currently streamed props.
+            StopCameraAudio();
+            ResetCameraDetectionState();
+
+            // This removes standing and fallen props, deletes their blips,
+            // and clears _activeCameras.
+            DeleteActiveCameras();
+
+            foreach (CameraDefinition definition in _cameraDefinitions)
+            {
+                definition.IsDestroyed = false;
+            }
+
+            // Force UpdateNearbyCameras() to recreate nearby cameras
+            // on the next tick rather than waiting for its normal interval.
+            _nextCameraStreamingCheck = 0;
+
+            if (destroyedCameraCount == 0)
+            {
+                GTA.UI.Notification.Show(
+                    "~b~Flock cameras rebuilt.~s~ No destroyed cameras needed restoring."
+                );
+            }
+            else
+            {
+                GTA.UI.Notification.Show(
+                    $"~g~Restored {destroyedCameraCount} destroyed Flock " +
+                    (destroyedCameraCount == 1 ? "camera." : "cameras.")
+                );
+            }
+        }
+
+
+        //Stats stuff
+        private void RefreshStatsMenu()
+        {
+            _totalDestroyedStat.AltTitle =
+                _stats.TotalCamerasDestroyed.ToString("N0");
+
+            _fastestTenStat.AltTitle =
+                FormatRecordTime(
+                    _stats.FastestTenCamerasSeconds
+                );
+
+            _fastestFiftyStat.AltTitle =
+                FormatRecordTime(
+                    _stats.FastestFiftyCamerasSeconds
+                );
+
+            _fastestAllStat.AltTitle =
+                FormatRecordTime(
+                    _stats.FastestAllCamerasSeconds
+                );
+
+            _policeReportsStat.AltTitle =
+                _stats.TotalPoliceReports.ToString("N0");
+
+            _falseReportsStat.AltTitle =
+                _stats.TotalFalseReports.ToString("N0");
+
+            _cameraSightingsStat.AltTitle =
+                _stats.TotalCameraSightings.ToString("N0");
+
+            _photosRenderedStat.AltTitle =
+                _stats.TotalPhotosRendered.ToString("N0");
+
+            _photosWaitingStat.AltTitle =
+                _photoLab.PhotosWaitingInQueue.ToString("N0");
+        }
+
+        private static string FormatRecordTime(
+            double seconds
+        )
+        {
+            if (seconds <= 0d)
+            {
+                return "--";
+            }
+
+            TimeSpan time = TimeSpan.FromSeconds(seconds);
+
+            if (time.TotalHours >= 1d)
+            {
+                return string.Format(
+                    "{0}:{1:00}:{2:00.000}",
+                    (int)time.TotalHours,
+                    time.Minutes,
+                    time.Seconds + (time.Milliseconds / 1000d)
+                );
+            }
+
+            return string.Format(
+                "{0}:{1:00.000}",
+                (int)time.TotalMinutes,
+                time.Seconds + (time.Milliseconds / 1000d)
+            );
+        }
+
+        private void SaveStats()
+        {
+            if (_statsStore.Save(_stats))
+            {
+                _statsSaveErrorShown = false;
+                return;
+            }
+
+            if (_statsSaveErrorShown)
+            {
+                return;
+            }
+
+            _statsSaveErrorShown = true;
+
+            GTA.UI.Notification.Show(
+                "~r~Flock statistics could not be saved."
+            );
+        }
+
+        private void OnPhotoGenerated()
+        {
+            _stats.TotalPhotosRendered++;
+            SaveStats();
+        }
     }
-}   
+}

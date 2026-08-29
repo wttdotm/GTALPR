@@ -1,0 +1,1003 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Web.Script.Serialization;
+using GTA.Math;
+
+namespace FlockSurveillance
+{
+    /// <summary>
+    /// Reads version-one scene manifests into the recorder DTOs and applies
+    /// the safety validation required before any GTA state is changed.
+    /// </summary>
+    internal static class SurveillancePhotoLabManifestReader
+    {
+        public const int ReaderVersion = 1;
+        private const long MaximumManifestBytes = 16L * 1024L * 1024L;
+        private const int MaximumEntities = 4096;
+        private const int MaximumViews = 64;
+        private const long MaximumOutputPixels = 33177600L;
+
+        public static bool TryLoad(
+            string manifestPath,
+            out SceneSnapshotDto scene,
+            out string error
+        )
+        {
+            scene = null;
+            error = null;
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(manifestPath))
+                {
+                    error = "A scene manifest path is required.";
+                    return false;
+                }
+
+                string fullPath = Path.GetFullPath(manifestPath);
+                FileInfo info = new FileInfo(fullPath);
+
+                if (!info.Exists)
+                {
+                    error = "The scene manifest does not exist.";
+                    return false;
+                }
+
+                if (info.Length <= 0 || info.Length > MaximumManifestBytes)
+                {
+                    error =
+                        "The scene manifest is empty or exceeds the " +
+                        "16 MB safety limit.";
+                    return false;
+                }
+
+                string json;
+
+                using (
+                    FileStream stream = new FileStream(
+                        fullPath,
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete
+                    )
+                )
+                using (StreamReader reader = new StreamReader(stream))
+                {
+                    json = reader.ReadToEnd();
+                }
+
+                JavaScriptSerializer serializer =
+                    new JavaScriptSerializer
+                    {
+                        MaxJsonLength = (int)MaximumManifestBytes,
+                        RecursionLimit = 128
+                    };
+
+                scene = serializer.Deserialize<SceneSnapshotDto>(json);
+
+                if (!ValidateAndNormalize(scene, out error))
+                {
+                    scene = null;
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error =
+                    "Could not read the scene manifest: " +
+                    exception.Message;
+                scene = null;
+                return false;
+            }
+        }
+
+        private static bool ValidateAndNormalize(
+            SceneSnapshotDto scene,
+            out string error
+        )
+        {
+            error = null;
+
+            if (scene == null)
+            {
+                error = "The scene manifest did not contain an object.";
+                return false;
+            }
+
+            if (!string.Equals(
+                scene.Schema,
+                "flock.scene-snapshot",
+                StringComparison.Ordinal
+            ))
+            {
+                error = "This is not a Flock scene snapshot.";
+                return false;
+            }
+
+            if (
+                scene.SchemaVersion != 1 ||
+                scene.MinimumReaderVersion > ReaderVersion
+            )
+            {
+                error =
+                    "The scene schema version is not supported by this " +
+                    "Photo Lab.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(scene.SnapshotId))
+            {
+                error = "The scene is missing SnapshotId.";
+                return false;
+            }
+
+            DateTime capturedAt;
+
+            if (!DateTime.TryParse(
+                scene.CapturedAtUtc,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out capturedAt
+            ))
+            {
+                error = "The scene has an invalid CapturedAtUtc value.";
+                return false;
+            }
+
+            if (!IsFinite(scene.CaptureRadiusMeters) ||
+                scene.CaptureRadiusMeters <= 0f ||
+                scene.CaptureRadiusMeters > 1000f)
+            {
+                error = "The scene has an invalid capture radius.";
+                return false;
+            }
+
+            scene.Views = scene.Views ?? new List<SceneCameraViewDto>();
+            scene.Vehicles =
+                scene.Vehicles ?? new List<SceneVehicleDto>();
+            scene.Peds = scene.Peds ?? new List<ScenePedDto>();
+            scene.Props = scene.Props ?? new List<ScenePropDto>();
+            scene.Projectiles =
+                scene.Projectiles ?? new List<SceneProjectileDto>();
+            scene.KnownUnsupportedState =
+                scene.KnownUnsupportedState ?? new List<string>();
+
+            if (scene.World == null)
+            {
+                error = "The scene is missing its world state.";
+                return false;
+            }
+
+            scene.World.UnavailableFields =
+                scene.World.UnavailableFields ?? new List<string>();
+
+            if (scene.Views.Count == 0 ||
+                scene.Views.Count > MaximumViews)
+            {
+                error = "The scene has no usable camera views.";
+                return false;
+            }
+
+            int entityCount =
+                scene.Vehicles.Count +
+                scene.Peds.Count +
+                scene.Props.Count +
+                scene.Projectiles.Count;
+
+            if (entityCount > MaximumEntities)
+            {
+                error =
+                    "The scene exceeds the 4096-entity reconstruction " +
+                    "safety limit.";
+                return false;
+            }
+
+            HashSet<string> cameraIds = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase
+            );
+
+            for (int index = 0; index < scene.Views.Count; index++)
+            {
+                SceneCameraViewDto view = scene.Views[index];
+
+                if (view == null ||
+                    string.IsNullOrWhiteSpace(view.CameraId) ||
+                    !cameraIds.Add(view.CameraId))
+                {
+                    error = "The scene has an invalid or duplicate camera.";
+                    return false;
+                }
+
+                view.UnavailableFields =
+                    view.UnavailableFields ?? new List<string>();
+
+                if (!IsFinite(view.EyePosition) ||
+                    !IsFinite(view.LookAtPosition) ||
+                    DistanceSquared(
+                        view.EyePosition,
+                        view.LookAtPosition
+                    ) < 0.0001f)
+                {
+                    error =
+                        "Camera " + view.CameraId +
+                        " has invalid view geometry.";
+                    return false;
+                }
+
+                if (!IsFinite(view.PhotoFieldOfViewDegrees) ||
+                    view.PhotoFieldOfViewDegrees < 1f ||
+                    view.PhotoFieldOfViewDegrees > 170f ||
+                    !IsFinite(view.NearClipMeters) ||
+                    !IsFinite(view.FarClipMeters) ||
+                    view.NearClipMeters <= 0f ||
+                    view.FarClipMeters <= view.NearClipMeters)
+                {
+                    error =
+                        "Camera " + view.CameraId +
+                        " has invalid lens settings.";
+                    return false;
+                }
+
+                long pixels = (long)view.OutputWidth * view.OutputHeight;
+
+                if (view.OutputWidth < 64 ||
+                    view.OutputHeight < 64 ||
+                    view.OutputWidth > 7680 ||
+                    view.OutputHeight > 7680 ||
+                    pixels <= 0 ||
+                    pixels > MaximumOutputPixels)
+                {
+                    error =
+                        "Camera " + view.CameraId +
+                        " has unsupported output dimensions.";
+                    return false;
+                }
+            }
+
+            HashSet<string> entityIds = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase
+            );
+            HashSet<string> vehicleIds = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase
+            );
+            HashSet<string> pedIds = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase
+            );
+
+            foreach (SceneVehicleDto vehicle in scene.Vehicles)
+            {
+                if (!ValidateCommon(
+                    vehicle?.Entity,
+                    "vehicle",
+                    entityIds,
+                    out error
+                ))
+                {
+                    return false;
+                }
+
+                vehicleIds.Add(vehicle.Entity.EntityId);
+
+                vehicle.Occupants =
+                    vehicle.Occupants ??
+                    new List<SceneVehicleOccupantDto>();
+                vehicle.Mods =
+                    vehicle.Mods ?? new List<SceneVehicleModDto>();
+                vehicle.ToggleMods =
+                    vehicle.ToggleMods ??
+                    new List<SceneVehicleToggleModDto>();
+                vehicle.Extras =
+                    vehicle.Extras ?? new List<SceneVehicleExtraDto>();
+                vehicle.NeonLights =
+                    vehicle.NeonLights ??
+                    new List<SceneVehicleNeonDto>();
+                vehicle.Doors =
+                    vehicle.Doors ?? new List<SceneVehicleDoorDto>();
+                vehicle.Windows =
+                    vehicle.Windows ?? new List<SceneVehicleWindowDto>();
+            }
+
+            foreach (ScenePedDto ped in scene.Peds)
+            {
+                if (!ValidateCommon(
+                    ped?.Entity,
+                    "ped",
+                    entityIds,
+                    out error
+                ))
+                {
+                    return false;
+                }
+
+                pedIds.Add(ped.Entity.EntityId);
+
+                ped.Components =
+                    ped.Components ?? new List<ScenePedComponentDto>();
+                ped.Props = ped.Props ?? new List<ScenePedPropDto>();
+
+                if (ped.Appearance != null)
+                {
+                    ped.Appearance.UnavailableFeatures =
+                        ped.Appearance.UnavailableFeatures ??
+                        new List<string>();
+                }
+
+                if (ped.CurrentWeapon != null)
+                {
+                    ped.CurrentWeapon.Components =
+                        ped.CurrentWeapon.Components ??
+                        new List<SceneWeaponComponentDto>();
+                }
+            }
+
+            foreach (ScenePropDto prop in scene.Props)
+            {
+                if (!ValidateCommon(
+                    prop?.Entity,
+                    "prop",
+                    entityIds,
+                    out error
+                ))
+                {
+                    return false;
+                }
+            }
+
+            foreach (SceneProjectileDto projectile in scene.Projectiles)
+            {
+                if (!ValidateCommon(
+                    projectile?.Entity,
+                    "projectile",
+                    entityIds,
+                    out error
+                ))
+                {
+                    return false;
+                }
+            }
+
+            foreach (SceneCameraViewDto view in scene.Views)
+            {
+                if (string.IsNullOrWhiteSpace(view.TargetPedId) ||
+                    !pedIds.Contains(view.TargetPedId))
+                {
+                    error =
+                        "Camera " + view.CameraId +
+                        " does not reference a captured target ped.";
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(view.TargetVehicleId) &&
+                    !vehicleIds.Contains(view.TargetVehicleId))
+                {
+                    error =
+                        "Camera " + view.CameraId +
+                        " references a missing target vehicle.";
+                    return false;
+                }
+            }
+
+            if (scene.CaptureStats == null)
+            {
+                scene.CaptureStats = new SceneCaptureStatsDto();
+            }
+
+            scene.CaptureStats.Warnings =
+                scene.CaptureStats.Warnings ?? new List<string>();
+            scene.CaptureStats.CriticalOmissions =
+                scene.CaptureStats.CriticalOmissions ?? new List<string>();
+
+            return true;
+        }
+
+        private static bool ValidateCommon(
+            SceneCommonEntityDto common,
+            string kind,
+            HashSet<string> entityIds,
+            out string error
+        )
+        {
+            error = null;
+
+            if (common == null ||
+                string.IsNullOrWhiteSpace(common.EntityId) ||
+                !entityIds.Add(common.EntityId))
+            {
+                error =
+                    "The scene has an invalid or duplicate " + kind +
+                    " entity ID.";
+                return false;
+            }
+
+            if (common.ModelHash == 0 ||
+                !IsFinite(common.Position) ||
+                !IsFinite(common.Rotation) ||
+                !IsFinite(common.Quaternion))
+            {
+                error =
+                    "Entity " + common.EntityId +
+                    " has an invalid model or transform.";
+                return false;
+            }
+
+            if (common.Attachment != null)
+            {
+                common.Attachment.UnavailableFields =
+                    common.Attachment.UnavailableFields ??
+                    new List<string>();
+            }
+
+            return true;
+        }
+
+        private static bool IsFinite(SceneVector3Dto value)
+        {
+            return value != null &&
+                IsFinite(value.X) &&
+                IsFinite(value.Y) &&
+                IsFinite(value.Z);
+        }
+
+        private static bool IsFinite(SceneQuaternionDto value)
+        {
+            return value != null &&
+                IsFinite(value.X) &&
+                IsFinite(value.Y) &&
+                IsFinite(value.Z) &&
+                IsFinite(value.W);
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        private static float DistanceSquared(
+            SceneVector3Dto left,
+            SceneVector3Dto right
+        )
+        {
+            float x = left.X - right.X;
+            float y = left.Y - right.Y;
+            float z = left.Z - right.Z;
+            return (x * x) + (y * y) + (z * z);
+        }
+    }
+
+    internal sealed class SurveillancePhotoScenePlan
+    {
+        private SurveillancePhotoScenePlan(
+            string manifestPath,
+            SceneSnapshotDto scene,
+            List<SurveillancePhotoViewPlan> views,
+            Vector3 center,
+            float streamingRadius,
+            float minimumLiveDistance
+        )
+        {
+            ManifestPath = manifestPath;
+            Scene = scene;
+            Views = views;
+            Center = center;
+            StreamingRadius = streamingRadius;
+            MinimumLiveDistance = minimumLiveDistance;
+        }
+
+        public string ManifestPath { get; }
+        public SceneSnapshotDto Scene { get; }
+        public List<SurveillancePhotoViewPlan> Views { get; }
+        public Vector3 Center { get; }
+        public float StreamingRadius { get; }
+        public float MinimumLiveDistance { get; }
+
+        public static bool TryCreate(
+            string manifestPath,
+            string photoRoot,
+            out SurveillancePhotoScenePlan plan,
+            out string error
+        )
+        {
+            SurveillancePhotoScenePlanResult ignored;
+            return TryCreate(
+                manifestPath,
+                photoRoot,
+                out plan,
+                out error,
+                out ignored
+            );
+        }
+
+        public static bool TryCreate(
+            string manifestPath,
+            string photoRoot,
+            out SurveillancePhotoScenePlan plan,
+            out string error,
+            out SurveillancePhotoScenePlanResult result
+        )
+        {
+            plan = null;
+            result = SurveillancePhotoScenePlanResult.Invalid;
+
+            SceneSnapshotDto scene;
+
+            if (!SurveillancePhotoLabManifestReader.TryLoad(
+                manifestPath,
+                out scene,
+                out error
+            ))
+            {
+                return false;
+            }
+
+            DateTime capturedAt = DateTime.Parse(
+                scene.CapturedAtUtc,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind
+            ).ToUniversalTime();
+
+            string dateDirectory = Path.Combine(
+                Path.GetFullPath(photoRoot),
+                capturedAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            );
+
+            string safeSnapshotId = SanitizeFilePart(scene.SnapshotId, 80);
+            List<SurveillancePhotoViewPlan> missingViews =
+                new List<SurveillancePhotoViewPlan>();
+
+            for (int index = 0; index < scene.Views.Count; index++)
+            {
+                SceneCameraViewDto view = scene.Views[index];
+                string safeCameraId = SanitizeFilePart(view.CameraId, 80);
+                string fileName = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}__v{1:D2}__{2}.jpg",
+                    safeSnapshotId,
+                    index + 1,
+                    safeCameraId
+                );
+                string outputPath = Path.Combine(dateDirectory, fileName);
+
+                if (!File.Exists(outputPath))
+                {
+                    missingViews.Add(
+                        new SurveillancePhotoViewPlan(
+                            view,
+                            index,
+                            outputPath
+                        )
+                    );
+                }
+            }
+
+            if (missingViews.Count == 0)
+            {
+                error = "Every camera view in this scene already has a JPG.";
+                result = SurveillancePhotoScenePlanResult.AlreadyRendered;
+                return false;
+            }
+
+            Vector3 center = ComputeCenter(scene.Views);
+            float furthestViewDistance = ComputeFurthestViewDistance(
+                scene.Views,
+                center
+            );
+            float radius = ComputeStreamingRadius(
+                scene,
+                furthestViewDistance
+            );
+            float minimumLiveDistance = Math.Max(
+                radius + 50f,
+                scene.CaptureRadiusMeters + furthestViewDistance + 75f
+            );
+
+            if (!IsFinite(center) ||
+                !IsFinite(furthestViewDistance) ||
+                !IsFinite(radius) ||
+                !IsFinite(minimumLiveDistance))
+            {
+                error =
+                    "The scene camera geometry exceeds Photo Lab's safe " +
+                    "coordinate range.";
+                return false;
+            }
+
+            plan = new SurveillancePhotoScenePlan(
+                Path.GetFullPath(manifestPath),
+                scene,
+                missingViews,
+                center,
+                radius,
+                minimumLiveDistance
+            );
+            error = null;
+            result = SurveillancePhotoScenePlanResult.Ready;
+            return true;
+        }
+
+        private static Vector3 ComputeCenter(
+            List<SceneCameraViewDto> views
+        )
+        {
+            Vector3 total = Vector3.Zero;
+
+            foreach (SceneCameraViewDto view in views)
+            {
+                total += new Vector3(
+                    view.LookAtPosition.X,
+                    view.LookAtPosition.Y,
+                    view.LookAtPosition.Z
+                );
+            }
+
+            return total / Math.Max(1, views.Count);
+        }
+
+        private static float ComputeFurthestViewDistance(
+            List<SceneCameraViewDto> views,
+            Vector3 center
+        )
+        {
+            float furthest = 0f;
+
+            foreach (SceneCameraViewDto view in views)
+            {
+                Vector3 eye = new Vector3(
+                    view.EyePosition.X,
+                    view.EyePosition.Y,
+                    view.EyePosition.Z
+                );
+                Vector3 target = new Vector3(
+                    view.LookAtPosition.X,
+                    view.LookAtPosition.Y,
+                    view.LookAtPosition.Z
+                );
+                furthest = Math.Max(
+                    furthest,
+                    Math.Max(
+                        eye.DistanceTo(center),
+                        target.DistanceTo(center)
+                    )
+                );
+            }
+
+            return furthest;
+        }
+
+        private static float ComputeStreamingRadius(
+            SceneSnapshotDto scene,
+            float furthestViewDistance
+        )
+        {
+            float requested =
+                scene.CaptureRadiusMeters + furthestViewDistance + 25f;
+            return Math.Max(100f, Math.Min(500f, requested));
+        }
+
+        private static bool IsFinite(Vector3 value)
+        {
+            return IsFinite(value.X) &&
+                IsFinite(value.Y) &&
+                IsFinite(value.Z);
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        private static string SanitizeFilePart(
+            string value,
+            int maximumLength
+        )
+        {
+            HashSet<char> invalid = new HashSet<char>(
+                Path.GetInvalidFileNameChars()
+            );
+            char[] characters = (value ?? "item")
+                .Select(character =>
+                    invalid.Contains(character) ||
+                    character == '/' ||
+                    character == '\\'
+                        ? '_'
+                        : character
+                )
+                .ToArray();
+            string sanitized = new string(characters).Trim();
+
+            if (sanitized.Length == 0)
+            {
+                sanitized = "item";
+            }
+
+            return sanitized.Length <= maximumLength
+                ? sanitized
+                : sanitized.Substring(0, maximumLength);
+        }
+    }
+
+    internal enum SurveillancePhotoScenePlanResult
+    {
+        Invalid,
+        AlreadyRendered,
+        Ready
+    }
+
+    /// <summary>
+    /// Takes one immutable discovery snapshot for a Photo Lab batch. Invalid
+    /// and already-rendered manifests are counted but never enter the queue.
+    /// Every colliding output claim is excluded so no scene can be credited
+    /// for a JPG produced by a different manifest.
+    /// </summary>
+    internal sealed class SurveillancePhotoBatchPlan
+    {
+        private SurveillancePhotoBatchPlan(
+            List<SurveillancePhotoScenePlan> scenes,
+            int manifestCount,
+            int invalidManifestCount,
+            int alreadyRenderedManifestCount,
+            int collidingManifestCount,
+            int collidingViewCount,
+            string firstInvalidManifestError
+        )
+        {
+            Scenes = scenes;
+            ManifestCount = manifestCount;
+            InvalidManifestCount = invalidManifestCount;
+            AlreadyRenderedManifestCount = alreadyRenderedManifestCount;
+            CollidingManifestCount = collidingManifestCount;
+            CollidingViewCount = collidingViewCount;
+            FirstInvalidManifestError = firstInvalidManifestError;
+        }
+
+        public List<SurveillancePhotoScenePlan> Scenes { get; }
+        public int ManifestCount { get; }
+        public int InvalidManifestCount { get; }
+        public int AlreadyRenderedManifestCount { get; }
+        public int CollidingManifestCount { get; }
+        public int CollidingViewCount { get; }
+        public string FirstInvalidManifestError { get; }
+
+        public static SurveillancePhotoBatchPlan FromSingle(
+            SurveillancePhotoScenePlan scene
+        )
+        {
+            if (scene == null)
+            {
+                throw new ArgumentNullException(nameof(scene));
+            }
+
+            return new SurveillancePhotoBatchPlan(
+                new List<SurveillancePhotoScenePlan> { scene },
+                1,
+                0,
+                0,
+                0,
+                0,
+                null
+            );
+        }
+
+        public static bool TryDiscover(
+            string sceneDirectory,
+            string photoDirectory,
+            out SurveillancePhotoBatchPlan batch,
+            out string error
+        )
+        {
+            batch = null;
+            error = null;
+
+            if (string.IsNullOrWhiteSpace(sceneDirectory) ||
+                !Directory.Exists(sceneDirectory))
+            {
+                error = "No scene directory exists yet: " + sceneDirectory;
+                return false;
+            }
+
+            List<string> candidates;
+
+            try
+            {
+                candidates = Directory
+                    .EnumerateFiles(
+                        sceneDirectory,
+                        "*.json",
+                        SearchOption.AllDirectories
+                    )
+                    .OrderBy(
+                        path => path,
+                        StringComparer.OrdinalIgnoreCase
+                    )
+                    .ToList();
+            }
+            catch (Exception exception)
+            {
+                error =
+                    "Could not enumerate scene manifests: " +
+                    exception.Message;
+                return false;
+            }
+
+            if (candidates.Count == 0)
+            {
+                error = "No recorded scene manifests were found.";
+                return false;
+            }
+
+            List<SurveillancePhotoScenePlan> discovered =
+                new List<SurveillancePhotoScenePlan>();
+            int invalidCount = 0;
+            int alreadyRenderedCount = 0;
+            string firstInvalidError = null;
+
+            foreach (string manifestPath in candidates)
+            {
+                SurveillancePhotoScenePlan scene;
+                string candidateError;
+                SurveillancePhotoScenePlanResult result;
+                bool ready = false;
+
+                try
+                {
+                    ready = SurveillancePhotoScenePlan.TryCreate(
+                        manifestPath,
+                        photoDirectory,
+                        out scene,
+                        out candidateError,
+                        out result
+                    );
+                }
+                catch (Exception exception)
+                {
+                    scene = null;
+                    result = SurveillancePhotoScenePlanResult.Invalid;
+                    candidateError =
+                        "Could not plan this manifest: " +
+                        exception.Message;
+                }
+
+                if (ready)
+                {
+                    discovered.Add(scene);
+                }
+                else if (
+                    result ==
+                    SurveillancePhotoScenePlanResult.AlreadyRendered
+                )
+                {
+                    alreadyRenderedCount++;
+                }
+                else
+                {
+                    invalidCount++;
+
+                    if (string.IsNullOrWhiteSpace(firstInvalidError))
+                    {
+                        firstInvalidError =
+                            Path.GetFileName(manifestPath) + ": " +
+                            candidateError;
+                    }
+                }
+            }
+
+            Dictionary<string, int> outputClaimCounts =
+                new Dictionary<string, int>(
+                    StringComparer.OrdinalIgnoreCase
+                );
+
+            foreach (SurveillancePhotoScenePlan scene in discovered)
+            {
+                foreach (SurveillancePhotoViewPlan view in scene.Views)
+                {
+                    int count;
+                    outputClaimCounts.TryGetValue(view.OutputPath, out count);
+                    outputClaimCounts[view.OutputPath] = count + 1;
+                }
+            }
+
+            HashSet<string> collidingPaths = new HashSet<string>(
+                outputClaimCounts
+                    .Where(pair => pair.Value > 1)
+                    .Select(pair => pair.Key),
+                StringComparer.OrdinalIgnoreCase
+            );
+            int collidingManifestCount = 0;
+            int collidingViewCount = 0;
+            List<SurveillancePhotoScenePlan> queue =
+                new List<SurveillancePhotoScenePlan>();
+
+            foreach (SurveillancePhotoScenePlan scene in discovered)
+            {
+                int originalViewCount = scene.Views.Count;
+                scene.Views.RemoveAll(view =>
+                    collidingPaths.Contains(view.OutputPath)
+                );
+                int removed = originalViewCount - scene.Views.Count;
+
+                if (removed > 0)
+                {
+                    collidingManifestCount++;
+                    collidingViewCount += removed;
+                }
+
+                if (scene.Views.Count > 0)
+                {
+                    queue.Add(scene);
+                }
+            }
+
+            queue = queue
+                .OrderByDescending(scene => DateTime.Parse(
+                    scene.Scene.CapturedAtUtc,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind
+                ).ToUniversalTime())
+                .ThenBy(
+                    scene => scene.Scene.SnapshotId,
+                    StringComparer.OrdinalIgnoreCase
+                )
+                .ThenBy(
+                    scene => scene.ManifestPath,
+                    StringComparer.OrdinalIgnoreCase
+                )
+                .ToList();
+
+            batch = new SurveillancePhotoBatchPlan(
+                queue,
+                candidates.Count,
+                invalidCount,
+                alreadyRenderedCount,
+                collidingManifestCount,
+                collidingViewCount,
+                firstInvalidError
+            );
+
+            if (queue.Count > 0)
+            {
+                return true;
+            }
+
+            if (collidingViewCount > 0)
+            {
+                error =
+                    "No scenes were queued because all missing JPG paths " +
+                    "are claimed by more than one manifest.";
+            }
+            else if (invalidCount > 0)
+            {
+                error =
+                    "No renderable unrendered scene was found. First " +
+                    "manifest error: " + firstInvalidError;
+            }
+            else
+            {
+                error = "No unrendered camera views remain.";
+            }
+
+            return false;
+        }
+    }
+
+    internal sealed class SurveillancePhotoViewPlan
+    {
+        public SurveillancePhotoViewPlan(
+            SceneCameraViewDto view,
+            int originalIndex,
+            string outputPath
+        )
+        {
+            View = view;
+            OriginalIndex = originalIndex;
+            OutputPath = outputPath;
+        }
+
+        public SceneCameraViewDto View { get; }
+        public int OriginalIndex { get; }
+        public string OutputPath { get; }
+    }
+}
