@@ -79,6 +79,14 @@ namespace FlockSurveillance
 
         public int SkippedEntityCount => _skippedEntityCount;
 
+        public int PlannedModelCount => _models.Count;
+
+        public int PlannedCloneCount =>
+            _scene.Vehicles.Count +
+            _scene.Peds.Count +
+            _propsToClone.Count +
+            _scene.Projectiles.Count;
+
         public bool TryGetSpawnedEntity(
             string entityId,
             out Entity entity

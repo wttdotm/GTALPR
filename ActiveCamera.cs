@@ -14,5 +14,6 @@ namespace FlockSurveillance
         public int WeaponHitCount { get; set; }
         public Vector3[] FovEndpoints { get; set; }
         public bool WasSeeingPlayer { get; set; }
+        public int SightingCooldownUntilGameTime { get; set; }
     }
 }

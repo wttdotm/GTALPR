@@ -26,6 +26,161 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Test-IsSceneManifestName {
+    param([string]$Name)
+
+    return (
+        -not [string]::IsNullOrWhiteSpace($Name) -and
+        (
+            $Name.EndsWith(
+                ".json",
+                [StringComparison]::OrdinalIgnoreCase
+            ) -or
+            $Name.EndsWith(
+                ".json.gz",
+                [StringComparison]::OrdinalIgnoreCase
+            )
+        )
+    )
+}
+
+function Get-SceneManifestIdentity {
+    param([string]$Path)
+
+    if ($Path.EndsWith(
+        ".json.gz",
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        return $Path.Substring(0, $Path.Length - ".json.gz".Length)
+    }
+
+    return $Path.Substring(0, $Path.Length - ".json".Length)
+}
+
+function Get-SceneManifestFiles {
+    param(
+        [string]$Directory,
+        [datetime]$ModifiedSince = [datetime]::MinValue,
+        [switch]$IgnoreEnumerationErrors
+    )
+
+    $selected = @{}
+    $enumerationErrorAction = if ($IgnoreEnumerationErrors) {
+        "SilentlyContinue"
+    }
+    else {
+        "Stop"
+    }
+
+    Get-ChildItem `
+        -LiteralPath $Directory `
+        -Recurse `
+        -File `
+        -ErrorAction $enumerationErrorAction |
+        Where-Object {
+            $_.LastWriteTime -ge $ModifiedSince -and
+            (Test-IsSceneManifestName $_.Name)
+        } |
+        Sort-Object FullName |
+        ForEach-Object {
+            $identity = Get-SceneManifestIdentity $_.FullName
+            $existing = $selected[$identity]
+            $isGzip = $_.Name.EndsWith(
+                ".json.gz",
+                [StringComparison]::OrdinalIgnoreCase
+            )
+
+            if ($null -eq $existing -or $isGzip) {
+                $selected[$identity] = $_
+            }
+        }
+
+    return @(
+        $selected.Values |
+        Sort-Object LastWriteTime, FullName
+    )
+}
+
+function Read-SceneManifestText {
+    param([IO.FileInfo]$File)
+
+    $maximumBytes = [long](16 * 1024 * 1024)
+    $fileStream = $null
+    $gzipStream = $null
+    $contents = $null
+    $reader = $null
+
+    try {
+        $fileStream = [IO.File]::Open(
+            $File.FullName,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::Read,
+            [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+        )
+
+        $inputStream = $fileStream
+
+        if ($File.Name.EndsWith(
+            ".json.gz",
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+            $gzipStream = [IO.Compression.GZipStream]::new(
+                $fileStream,
+                [IO.Compression.CompressionMode]::Decompress
+            )
+            $inputStream = $gzipStream
+        }
+
+        $contents = [IO.MemoryStream]::new()
+        $buffer = [byte[]]::new(81920)
+
+        while (($read = $inputStream.Read(
+            $buffer,
+            0,
+            $buffer.Length
+        )) -gt 0) {
+            if ($contents.Length + $read -gt $maximumBytes) {
+                throw (
+                    "The decompressed scene manifest exceeds the " +
+                    "16 MB safety limit."
+                )
+            }
+
+            $contents.Write($buffer, 0, $read)
+        }
+
+        if ($contents.Length -eq 0) {
+            throw "The scene manifest is empty."
+        }
+
+        $contents.Position = 0
+        $reader = [IO.StreamReader]::new(
+            $contents,
+            [Text.Encoding]::UTF8,
+            $true
+        )
+
+        return $reader.ReadToEnd()
+    }
+    finally {
+        if ($null -ne $reader) {
+            $reader.Dispose()
+        }
+
+        if ($null -ne $gzipStream) {
+            $gzipStream.Dispose()
+        }
+
+        if ($null -ne $fileStream) {
+            $fileStream.Dispose()
+        }
+
+        if ($null -ne $contents) {
+            $contents.Dispose()
+        }
+    }
+}
+
 function Add-CandidatePath {
     param(
         [System.Collections.ArrayList]$Candidates,
@@ -116,12 +271,9 @@ function Resolve-ScenePath {
     foreach ($candidate in $candidates) {
         if (
             (Test-Path -LiteralPath $candidate -PathType Container) -and
-            $null -ne (Get-ChildItem `
-                -LiteralPath $candidate `
-                -Recurse `
-                -File `
-                -Filter "*.json" `
-                -ErrorAction SilentlyContinue |
+            $null -ne (Get-SceneManifestFiles `
+                -Directory $candidate `
+                -IgnoreEnumerationErrors |
                 Select-Object -First 1)
         ) {
             return $candidate
@@ -344,24 +496,20 @@ function Get-Percentile {
 
 $root = Resolve-ScenePath $ScenePath
 $files = @(
-    Get-ChildItem `
-        -LiteralPath $root `
-        -Recurse `
-        -File `
-        -Filter "*.json" |
-        Where-Object { $_.LastWriteTime -ge $Since } |
-        Sort-Object LastWriteTime, FullName
+    Get-SceneManifestFiles `
+        -Directory $root `
+        -ModifiedSince $Since
 )
 
 Write-Host "Flock scene directory: $root"
-Write-Host "JSON files selected: $($files.Count)"
+Write-Host "Scene manifests selected: $($files.Count)"
 
 if ($Since -ne [datetime]::MinValue) {
     Write-Host "Modified since: $($Since.ToString('u'))"
 }
 
 if ($files.Count -eq 0) {
-    Write-Error "No scene JSON files matched."
+    Write-Error "No scene manifest files matched."
     exit 1
 }
 
@@ -376,7 +524,7 @@ foreach ($file in $files) {
     $scene = $null
 
     try {
-        $raw = [IO.File]::ReadAllText($file.FullName)
+        $raw = Read-SceneManifestText $file
         $scene = $raw | ConvertFrom-Json -ErrorAction Stop
     }
     catch {

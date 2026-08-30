@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("FlockSurveillance")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+db9586e99283b986703f39369c25cf21e7f47eef")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0995d571c76fc81012c7b9aea472633f0fc9afbb")]
 [assembly: System.Reflection.AssemblyProductAttribute("FlockSurveillance")]
 [assembly: System.Reflection.AssemblyTitleAttribute("FlockSurveillance")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

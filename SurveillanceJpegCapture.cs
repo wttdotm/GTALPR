@@ -85,10 +85,13 @@ namespace FlockSurveillance
             int outputHeight,
             SurveillancePhotoOverlayMetadata overlayMetadata,
             out long captureId,
+            out SurveillanceJpegCaptureTiming timing,
             out string error
         )
         {
+            long totalStarted = Stopwatch.GetTimestamp();
             captureId = 0L;
+            timing = new SurveillanceJpegCaptureTiming();
             error = null;
 
             if (_disposed)
@@ -143,19 +146,33 @@ namespace FlockSurveillance
             try
             {
                 ClientCaptureBounds bounds;
+                long segmentStarted = Stopwatch.GetTimestamp();
 
                 if (!TryGetGameClientBounds(out bounds, out error))
                 {
+                    timing.BoundsMilliseconds = ElapsedMilliseconds(
+                        segmentStarted
+                    );
+                    timing.MainThreadTotalMilliseconds =
+                        ElapsedMilliseconds(totalStarted);
                     Volatile.Write(ref _captureInFlight, 0);
                     return false;
                 }
 
+                timing.BoundsMilliseconds = ElapsedMilliseconds(
+                    segmentStarted
+                );
+
+                segmentStarted = Stopwatch.GetTimestamp();
                 bitmap = new Bitmap(
                     bounds.Width,
                     bounds.Height,
                     PixelFormat.Format24bppRgb
                 );
+                timing.BitmapAllocationMilliseconds =
+                    ElapsedMilliseconds(segmentStarted);
 
+                segmentStarted = Stopwatch.GetTimestamp();
                 using (Graphics graphics = Graphics.FromImage(bitmap))
                 {
                     graphics.CopyFromScreen(
@@ -167,9 +184,18 @@ namespace FlockSurveillance
                         CopyPixelOperation.SourceCopy
                     );
                 }
+                timing.PixelCopyMilliseconds = ElapsedMilliseconds(
+                    segmentStarted
+                );
 
+                segmentStarted = Stopwatch.GetTimestamp();
                 if (LooksLikeBlankCapture(bitmap))
                 {
+                    timing.BlankCheckMilliseconds = ElapsedMilliseconds(
+                        segmentStarted
+                    );
+                    timing.MainThreadTotalMilliseconds =
+                        ElapsedMilliseconds(totalStarted);
                     bitmap.Dispose();
                     bitmap = null;
                     Volatile.Write(ref _captureInFlight, 0);
@@ -180,6 +206,10 @@ namespace FlockSurveillance
                     return false;
                 }
 
+                timing.BlankCheckMilliseconds = ElapsedMilliseconds(
+                    segmentStarted
+                );
+
                 captureId = Interlocked.Increment(ref _nextCaptureId);
                 CaptureJob job = new CaptureJob(
                     captureId,
@@ -188,11 +218,18 @@ namespace FlockSurveillance
                     outputWidth,
                     outputHeight,
                     JpegQuality,
-                    overlayMetadata
+                    overlayMetadata,
+                    timing
                 );
 
+                segmentStarted = Stopwatch.GetTimestamp();
+                timing.EnqueuedTimestamp = Stopwatch.GetTimestamp();
                 if (!_jobs.TryAdd(job))
                 {
+                    timing.QueueInsertionMilliseconds =
+                        ElapsedMilliseconds(segmentStarted);
+                    timing.MainThreadTotalMilliseconds =
+                        ElapsedMilliseconds(totalStarted);
                     bitmap.Dispose();
                     bitmap = null;
                     captureId = 0L;
@@ -201,12 +238,19 @@ namespace FlockSurveillance
                     return false;
                 }
 
+                timing.QueueInsertionMilliseconds =
+                    ElapsedMilliseconds(segmentStarted);
+                timing.MainThreadTotalMilliseconds =
+                    ElapsedMilliseconds(totalStarted);
+
                 // The worker owns the bitmap after it enters the queue.
                 bitmap = null;
                 return true;
             }
             catch (Exception exception)
             {
+                timing.MainThreadTotalMilliseconds =
+                    ElapsedMilliseconds(totalStarted);
                 bitmap?.Dispose();
                 captureId = 0L;
                 Volatile.Write(ref _captureInFlight, 0);
@@ -222,6 +266,7 @@ namespace FlockSurveillance
             out bool createdNewFile,
             out long captureId,
             out string outputPath,
+            out SurveillanceJpegCaptureTiming timing,
             out string error
         )
         {
@@ -233,6 +278,7 @@ namespace FlockSurveillance
                 createdNewFile = false;
                 captureId = 0L;
                 outputPath = null;
+                timing = null;
                 error = null;
                 return false;
             }
@@ -241,6 +287,7 @@ namespace FlockSurveillance
             createdNewFile = result.CreatedNewFile;
             captureId = result.CaptureId;
             outputPath = result.OutputPath;
+            timing = result.Timing;
             error = result.Error;
             return true;
         }
@@ -272,40 +319,52 @@ namespace FlockSurveillance
         {
             foreach (CaptureJob job in _jobs.GetConsumingEnumerable())
             {
-                CaptureResult result;
+                long workerStarted = Stopwatch.GetTimestamp();
+                SurveillanceJpegCaptureTiming timing = job.Timing;
+                timing.QueueWaitMilliseconds = ElapsedMilliseconds(
+                    timing.EnqueuedTimestamp
+                );
+                bool succeeded = false;
+                bool createdNewFile = false;
+                string error = null;
 
                 try
                 {
-                    bool createdNewFile = WriteJpeg(job);
-                    result = new CaptureResult(
-                        job.CaptureId,
-                        true,
-                        createdNewFile,
-                        job.OutputPath,
-                        null
-                    );
+                    createdNewFile = WriteJpeg(job, timing);
+                    succeeded = true;
                 }
                 catch (Exception exception)
                 {
-                    result = new CaptureResult(
-                        job.CaptureId,
-                        false,
-                        false,
-                        job.OutputPath,
-                        "Could not write the JPEG: " + exception.Message
-                    );
+                    error =
+                        "Could not write the JPEG: " + exception.Message;
                 }
                 finally
                 {
                     job.Bitmap.Dispose();
                 }
 
+                timing.WorkerTotalMilliseconds = ElapsedMilliseconds(
+                    workerStarted
+                );
+                timing.WorkerCompletedTimestamp = Stopwatch.GetTimestamp();
+                CaptureResult result = new CaptureResult(
+                    job.CaptureId,
+                    succeeded,
+                    createdNewFile,
+                    job.OutputPath,
+                    timing,
+                    error
+                );
+
                 _results.Enqueue(result);
                 Volatile.Write(ref _captureInFlight, 0);
             }
         }
 
-        private bool WriteJpeg(CaptureJob job)
+        private bool WriteJpeg(
+            CaptureJob job,
+            SurveillanceJpegCaptureTiming timing
+        )
         {
             string directory = Path.GetDirectoryName(job.OutputPath);
 
@@ -326,6 +385,7 @@ namespace FlockSurveillance
 
             try
             {
+                long segmentStarted = Stopwatch.GetTimestamp();
                 using (
                     Bitmap output = ResizeAndCrop(
                         job.Bitmap,
@@ -334,12 +394,23 @@ namespace FlockSurveillance
                     )
                 )
                 {
+                    timing.ResizeMilliseconds = ElapsedMilliseconds(
+                        segmentStarted
+                    );
+                    segmentStarted = Stopwatch.GetTimestamp();
                     _overlayRenderer.Apply(
                         output,
                         job.OverlayMetadata
                     );
+                    timing.OverlayMilliseconds = ElapsedMilliseconds(
+                        segmentStarted
+                    );
 
+                    segmentStarted = Stopwatch.GetTimestamp();
                     ImageCodecInfo codec = FindJpegCodec();
+                    timing.CodecLookupMilliseconds = ElapsedMilliseconds(
+                        segmentStarted
+                    );
 
                     if (codec == null)
                     {
@@ -356,19 +427,29 @@ namespace FlockSurveillance
                             job.Quality
                         );
 
+                        segmentStarted = Stopwatch.GetTimestamp();
                         output.Save(temporaryPath, codec, parameters);
+                        timing.EncodeAndTemporaryWriteMilliseconds =
+                            ElapsedMilliseconds(segmentStarted);
                     }
                 }
 
+                long moveStarted = Stopwatch.GetTimestamp();
                 if (File.Exists(job.OutputPath))
                 {
                     File.Delete(temporaryPath);
+                    timing.FinalMoveMilliseconds = ElapsedMilliseconds(
+                        moveStarted
+                    );
                     return false;
                 }
 
                 try
                 {
                     File.Move(temporaryPath, job.OutputPath);
+                    timing.FinalMoveMilliseconds = ElapsedMilliseconds(
+                        moveStarted
+                    );
                     return true;
                 }
                 catch (IOException)
@@ -378,6 +459,9 @@ namespace FlockSurveillance
                     // job respected the no-overwrite contract.
                     if (File.Exists(job.OutputPath))
                     {
+                        timing.FinalMoveMilliseconds = ElapsedMilliseconds(
+                            moveStarted
+                        );
                         return false;
                     }
 
@@ -478,6 +562,19 @@ namespace FlockSurveillance
             }
 
             return null;
+        }
+
+        private static double ElapsedMilliseconds(long startedTimestamp)
+        {
+            if (startedTimestamp <= 0L)
+            {
+                return 0d;
+            }
+
+            return
+                (Stopwatch.GetTimestamp() - startedTimestamp) *
+                1000d /
+                Stopwatch.Frequency;
         }
 
         private static bool LooksLikeBlankCapture(Bitmap bitmap)
@@ -856,7 +953,8 @@ namespace FlockSurveillance
                 int outputWidth,
                 int outputHeight,
                 long quality,
-                SurveillancePhotoOverlayMetadata overlayMetadata
+                SurveillancePhotoOverlayMetadata overlayMetadata,
+                SurveillanceJpegCaptureTiming timing
             )
             {
                 CaptureId = captureId;
@@ -866,6 +964,7 @@ namespace FlockSurveillance
                 OutputHeight = outputHeight;
                 Quality = quality;
                 OverlayMetadata = overlayMetadata;
+                Timing = timing;
             }
 
             public long CaptureId { get; }
@@ -878,6 +977,7 @@ namespace FlockSurveillance
             {
                 get;
             }
+            public SurveillanceJpegCaptureTiming Timing { get; }
         }
 
         private sealed class CaptureResult
@@ -887,6 +987,7 @@ namespace FlockSurveillance
                 bool succeeded,
                 bool createdNewFile,
                 string outputPath,
+                SurveillanceJpegCaptureTiming timing,
                 string error
             )
             {
@@ -894,6 +995,7 @@ namespace FlockSurveillance
                 Succeeded = succeeded;
                 CreatedNewFile = createdNewFile;
                 OutputPath = outputPath;
+                Timing = timing;
                 Error = error;
             }
 
@@ -901,6 +1003,7 @@ namespace FlockSurveillance
             public bool Succeeded { get; }
             public bool CreatedNewFile { get; }
             public string OutputPath { get; }
+            public SurveillanceJpegCaptureTiming Timing { get; }
             public string Error { get; }
         }
 
@@ -1016,5 +1119,37 @@ namespace FlockSurveillance
 
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
+    }
+
+    internal sealed class SurveillanceJpegCaptureTiming
+    {
+        public double BoundsMilliseconds { get; set; }
+        public double BitmapAllocationMilliseconds { get; set; }
+        public double PixelCopyMilliseconds { get; set; }
+        public double BlankCheckMilliseconds { get; set; }
+        public double QueueInsertionMilliseconds { get; set; }
+        public double MainThreadTotalMilliseconds { get; set; }
+        public double QueueWaitMilliseconds { get; set; }
+        public double ResizeMilliseconds { get; set; }
+        public double OverlayMilliseconds { get; set; }
+        public double CodecLookupMilliseconds { get; set; }
+        public double EncodeAndTemporaryWriteMilliseconds { get; set; }
+        public double FinalMoveMilliseconds { get; set; }
+        public double WorkerTotalMilliseconds { get; set; }
+        internal long EnqueuedTimestamp { get; set; }
+        internal long WorkerCompletedTimestamp { get; set; }
+
+        public double GetWorkerFinishedToPollMilliseconds()
+        {
+            if (WorkerCompletedTimestamp <= 0L)
+            {
+                return 0d;
+            }
+
+            return
+                (Stopwatch.GetTimestamp() - WorkerCompletedTimestamp) *
+                1000d /
+                Stopwatch.Frequency;
+        }
     }
 }
