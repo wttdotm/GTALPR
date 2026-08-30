@@ -10,14 +10,11 @@ using GtaControl = GTA.Control;
 
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using LemonUI;
 using LemonUI.Menus;
 
-
-///TODO: make minimap FOV better
-/// 
-/// 
 namespace FlockSurveillance
 {
     public sealed class SurveillanceScript : Script
@@ -167,6 +164,9 @@ namespace FlockSurveillance
         private readonly NativeItem _totalDestroyedStat =
             new NativeItem("Cameras Destroyed");
 
+        private readonly NativeItem _fastestThreeStat =
+            new NativeItem("Fastest 3 Cameras");
+
         private readonly NativeItem _fastestTenStat =
             new NativeItem("Fastest 10 Cameras");
 
@@ -185,12 +185,107 @@ namespace FlockSurveillance
         private readonly NativeItem _cameraSightingsStat =
             new NativeItem("Camera Sightings");
 
-        private readonly NativeItem _photosRenderedStat =
-            new NativeItem("Photos Rendered");
+        private readonly string _statsSessionId =
+            Guid.NewGuid().ToString("N");
 
-        private readonly NativeItem _photosWaitingStat =
-            new NativeItem("Photos Waiting");
+        private int _statsSessionStartedAtGameTime;
 
+        private string _cameraCatalogId =
+            string.Empty;
+
+        private int _cameraCatalogSize;
+
+        // Photo menu stuff
+        private const double EstimatedPhotosPerMinute = 12d;
+        private const float MinimumCctvStrength = 0.5f;
+        private const float CctvStrengthStep = 0.05f;
+
+        private bool _capturePhotosEnabled = true;
+        private bool _sharePhotosOptIn;
+        private bool _photoMetricsRefreshQueued;
+        private bool _photoMetricsDirtyAfterRender;
+        private Task<PhotoMetricsResult> _photoMetricsTask;
+        private bool _controlPanelOwnsPause;
+
+        private sealed class PhotoMetricsResult
+        {
+            public bool Succeeded { get; set; }
+            public int GeneratedPhotoCount { get; set; }
+            public int PendingPhotoCount { get; set; }
+            public long CaptureFolderBytes { get; set; }
+            public string Error { get; set; }
+        }
+
+        private readonly NativeMenu _photosMenu =
+            new NativeMenu(
+                "FLOCK SURVEILLANCE",
+                "PHOTOS"
+            )
+            {
+                ItemCount = CountVisibility.Never
+            };
+
+        private readonly NativeCheckboxItem _capturePhotosItem =
+            new NativeCheckboxItem(
+                "Capture Photos",
+                "Record new camera sightings for later rendering.",
+                true
+            );
+
+        private readonly NativeItem _generatedPhotosItem =
+            new NativeItem(
+                "Photos Generated",
+                "Number of JPG files in the Photos folder and its children.",
+                "0"
+            );
+
+        private readonly NativeItem _estimatedQueueTimeItem =
+            new NativeItem(
+                "Estimated Queue Time",
+                "Estimated at 12 photos per minute.",
+                "0 min"
+            );
+
+        private readonly NativeCheckboxItem _cctvShaderItem =
+            new NativeCheckboxItem(
+                "CCTV Filter",
+                "Apply the CCTV treatment to saved JPGs.",
+                true
+            );
+
+        private readonly NativeSliderItem _cctvStrengthItem =
+            new NativeSliderItem(
+                "CCTV Strength: 0.65",
+                "Adjust the saved JPG CCTV treatment strength.",
+                30,
+                3
+            );
+
+        private readonly NativeItem _queuedPhotosItem =
+            new NativeItem(
+                "Photos Queued",
+                "Number of photos currently waiting to be rendered.",
+                "0"
+            );
+
+        private readonly NativeItem _startRenderItem =
+            new NativeItem(
+                "Start Render",
+                "Begin rendering the queued photos. Rendering can be canceled and resumed."
+            );
+
+        private readonly NativeCheckboxItem _sharePhotosItem =
+            new NativeCheckboxItem(
+                "Opt In To Share Photos",
+                "Consent preference only; sharing will be wired later.",
+                false
+            );
+
+        private readonly NativeItem _photoInformationItem =
+            new NativeItem(
+                "Photo Information",
+                "Photo storage information."
+            );
 
 
         public SurveillanceScript()
@@ -216,24 +311,81 @@ namespace FlockSurveillance
 
             _controlPanelPool.Add(_controlPanelMenu);
 
+            _statsSessionStartedAtGameTime =
+                Game.GameTime;
+
             _stats = _statsStore.Load();
 
             _statsMenu.Add(_totalDestroyedStat);
+            _statsMenu.Add(_fastestThreeStat);
             _statsMenu.Add(_fastestTenStat);
             _statsMenu.Add(_fastestFiftyStat);
             _statsMenu.Add(_fastestAllStat);
             _statsMenu.Add(_policeReportsStat);
             _statsMenu.Add(_falseReportsStat);
             _statsMenu.Add(_cameraSightingsStat);
-            _statsMenu.Add(_photosRenderedStat);
-            _statsMenu.Add(_photosWaitingStat);
 
             _controlPanelMenu.AddSubMenu(
                 _statsMenu,
-                "VIEW"
+                "OPEN"
             );
 
             _controlPanelPool.Add(_statsMenu);
+
+            _capturePhotosItem.CheckboxChanged +=
+                OnCapturePhotosChanged;
+
+            _cctvShaderItem.CheckboxChanged +=
+                OnCctvShaderChanged;
+
+            _cctvStrengthItem.ValueChanged +=
+                OnCctvStrengthChanged;
+
+            _startRenderItem.Activated +=
+                OnStartRenderActivated;
+
+            _sharePhotosItem.CheckboxChanged +=
+                OnSharePhotosChanged;
+
+            _photosMenu.Shown +=
+                OnPhotosMenuShown;
+
+            _photosMenu.Add(
+                new NativeSeparatorItem("CAPTURE")
+            );
+            _photosMenu.Add(_capturePhotosItem);
+            _photosMenu.Add(_generatedPhotosItem);
+            _photosMenu.Add(_queuedPhotosItem);
+            _photosMenu.Add(_estimatedQueueTimeItem);
+            _photosMenu.Add(_startRenderItem);
+
+            _photosMenu.Add(
+                new NativeSeparatorItem("RENDERING")
+            );
+            _photosMenu.Add(_cctvShaderItem);
+            _photosMenu.Add(_cctvStrengthItem);
+
+            _photosMenu.Add(
+                new NativeSeparatorItem("SHARING")
+            );
+            _photosMenu.Add(_sharePhotosItem);
+
+            _photosMenu.Add(
+                new NativeSeparatorItem("INFORMATION")
+            );
+            _photosMenu.Add(_photoInformationItem);
+
+            _controlPanelMenu.AddSubMenu(
+                _photosMenu,
+                "OPEN"
+            );
+
+            _controlPanelPool.Add(_photosMenu);
+
+            _photoLab.CctvEffectEnabled =
+                _cctvShaderItem.Checked;
+
+            UpdateCctvStrengthFromMenu();
 
             _photoLab.PhotoGenerated += OnPhotoGenerated;
 
@@ -262,13 +414,33 @@ namespace FlockSurveillance
                 _controlPanelPool.Process();
             }
 
+            UpdateControlPanelPauseState();
+            PumpPhotoMetricsRefresh();
+
             if (_statsMenu.Visible)
             {
                 RefreshStatsMenu();
             }
 
             _sceneRecorder.Tick();
-            if (_photoLab.Tick())
+
+            bool photoLabWasBusy =
+                _photoLab.IsBusy;
+
+            bool photoLabOwnsFrame =
+                _photoLab.Tick();
+
+            if (
+                photoLabWasBusy &&
+                !_photoLab.IsBusy &&
+                _photoMetricsDirtyAfterRender
+            )
+            {
+                _photoMetricsDirtyAfterRender = false;
+                RequestPhotoMetricsRefresh();
+            }
+
+            if (photoLabOwnsFrame)
             {
                 return;
             }
@@ -353,14 +525,21 @@ namespace FlockSurveillance
             {
                 PlayPictureTakenSound();
 
-                _sceneRecorder.TryRecordSighting(
-                    "f6-test-camera",
-                    _cameraPosition +
-                        new Vector3(0f, 0f, CameraEyeHeightMeters),
-                    _cameraHeading,
-                    CameraFovDegrees,
-                    CameraRangeMeters
-                );
+                if (_capturePhotosEnabled)
+                {
+                    _sceneRecorder.TryRecordSighting(
+                        "f6-test-camera",
+                        _cameraPosition +
+                            new Vector3(
+                                0f,
+                                0f,
+                                CameraEyeHeightMeters
+                            ),
+                        _cameraHeading,
+                        CameraFovDegrees,
+                        CameraRangeMeters
+                    );
+                }
             }
 
             bool reportableSighting =
@@ -503,17 +682,7 @@ namespace FlockSurveillance
             }
             if (e.KeyCode == Keys.F3)
             {
-                if (_photoLab.IsBusy)
-                {
-                    _photoLab.RequestCancel();
-                }
-                else if (!_photoLab.RequestLatestUnrenderedScene())
-                {
-                    GTA.UI.Notification.Show(
-                        "~r~Photo Lab~s~: " + _photoLab.LastError
-                    );
-                }
-
+                TogglePhotoQueueRendering();
                 return;
             }
 
@@ -602,24 +771,6 @@ namespace FlockSurveillance
                 $"Heading: {_cameraHeading:0.0}"
             );
         }
-        private void DrawCameraColumn(Color color)
-        {
-            World.DrawMarker(
-                MarkerType.VerticalCylinder,
-                _cameraPosition,
-                Vector3.Zero,
-                Vector3.Zero,
-                new Vector3(0.4f, 0.4f, 2.0f),
-                Color.FromArgb(180, color.R, color.G, color.B),
-                false,
-                false,
-                false,
-                null,
-                null,
-                false
-            );
-        }
-
         private void DrawHeadingLine(Color color)
         {
             Vector3 forward = HeadingToDirection(_cameraHeading);
@@ -848,6 +999,10 @@ namespace FlockSurveillance
 
         private void OnAborted(object sender, EventArgs e)
         {
+            _photoLab.PhotoGenerated -= OnPhotoGenerated;
+            _photosMenu.Shown -= OnPhotosMenuShown;
+            ReleaseControlPanelPause();
+            SaveStats();
             _photoLab.Dispose();
             _sceneRecorder.Dispose();
             StopCameraAudio();
@@ -1019,16 +1174,6 @@ namespace FlockSurveillance
         }
 
         //COP stuff
-
-        private void GiveTestWantedLevel()
-        {
-            Game.Player.WantedLevel = 2;
-
-            GTA.UI.Notification.Show(
-                "~r~Two-star wanted level applied"
-            );
-        }
-
         private void ClearWantedLevel()
         {
             Game.Player.WantedLevel = 0;
@@ -1038,47 +1183,6 @@ namespace FlockSurveillance
             );
         }
 
-        private void ForceHiddenEvasion()
-        {
-            if (Game.Player.WantedLevel == 0)
-            {
-                GTA.UI.Notification.Show(
-                    "~y~Franklin is not currently wanted"
-                );
-
-                return;
-            }
-
-            Function.Call(
-                Hash.FORCE_START_HIDDEN_EVASION,
-                Game.Player
-            );
-
-            GTA.UI.Notification.Show(
-                "~y~Hidden evasion forced"
-            );
-        }
-
-        private void ReportPlayerSpotted()
-        {
-            if (Game.Player.WantedLevel == 0)
-            {
-                GTA.UI.Notification.Show(
-                    "~y~Franklin is not currently wanted"
-                );
-
-                return;
-            }
-
-            Function.Call(
-                Hash.REPORT_POLICE_SPOTTED_PLAYER,
-                Game.Player
-            );
-
-            GTA.UI.Notification.Show(
-                "~r~Police sighting reported"
-            );
-        }
 
         private void ReportFlockCameraSighting()
         {
@@ -1088,6 +1192,8 @@ namespace FlockSurveillance
             );
 
             ScheduleWantedReportAudio();
+            _stats.TotalPoliceReports++;
+            SaveStats();
 
             GTA.UI.Notification.Show(
                 "~r~Flock Camera Sighting Reported!"
@@ -1102,6 +1208,8 @@ namespace FlockSurveillance
             );
 
             ScheduleFalsePositiveReportAudio();
+            _stats.TotalFalseReports++;
+            SaveStats();
 
             GTA.UI.Notification.Show(
                 "~r~Flock Camera Error: Civilian Reported As Criminal!"
@@ -1169,6 +1277,9 @@ namespace FlockSurveillance
                         );
                 }
 
+                RefreshCameraCatalogIdentity();
+
+
 
                 GTA.UI.Notification.Show(
                     $"~g~Loaded {_cameraDefinitions.Count} camera definitions"
@@ -1177,6 +1288,8 @@ namespace FlockSurveillance
             catch (Exception exception)
             {
                 _cameraDefinitions.Clear();
+                _cameraCatalogId = string.Empty;
+                _cameraCatalogSize = 0;
 
                 GTA.UI.Notification.Show(
                     $"~r~Camera JSON error: {exception.Message}"
@@ -1525,18 +1638,24 @@ namespace FlockSurveillance
                 {
                     PlayPictureTakenSound();
 
-                    _sceneRecorder.TryRecordSighting(
-                        camera.Definition.FlockCameraId,
-                        camera.Position +
-                            new Vector3(
-                                0f,
-                                0f,
-                                CameraEyeHeightMeters
-                            ),
-                        camera.Definition.Heading,
-                        CameraFovDegrees,
-                        CameraRangeMeters
-                    );
+                    if (_capturePhotosEnabled)
+                    {
+                        _sceneRecorder.TryRecordSighting(
+                            camera.Definition.FlockCameraId,
+                            camera.Position +
+                                new Vector3(
+                                    0f,
+                                    0f,
+                                    CameraEyeHeightMeters
+                                ),
+                            camera.Definition.Heading,
+                            CameraFovDegrees,
+                            CameraRangeMeters
+                        );
+                    }
+
+                    _stats.TotalCameraSightings++;
+                    SaveStats();
                 }
 
                 if (
@@ -1862,13 +1981,52 @@ namespace FlockSurveillance
             ActiveCamera camera
         )
         {
-            if (camera.Definition.IsDestroyed)
+            if (
+                camera == null ||
+                camera.Definition == null ||
+                camera.Definition.IsDestroyed
+            )
             {
                 return;
             }
 
             camera.Definition.IsDestroyed = true;
             camera.WasReportableSighting = false;
+
+            CameraDestructionEvent destructionEvent =
+                new CameraDestructionEvent
+                {
+                    CameraId =
+                        camera.Definition.FlockCameraId,
+
+                    DestroyedAtUtc =
+                        DateTime.UtcNow,
+
+                    SessionId =
+                        _statsSessionId,
+
+                    SessionElapsedMilliseconds =
+                        GetStatsSessionElapsedMilliseconds(),
+
+                    CameraCatalogId =
+                        _cameraCatalogId,
+
+                    CameraCatalogSize =
+                        _cameraCatalogSize,
+
+                    X = camera.Position.X,
+                    Y = camera.Position.Y,
+                    Z = camera.Position.Z,
+
+                    Heading =
+                        camera.Definition.Heading
+                };
+
+            _stats.RecordCameraDestruction(
+                destructionEvent
+            );
+
+            SaveStats();
 
             DeleteActiveCameraBlips(camera);
 
@@ -2140,18 +2298,6 @@ namespace FlockSurveillance
             }
 
             return false;
-        }
-
-        private void ShowLootInventory()
-        {
-            GTA.UI.Notification.Show(
-                "~b~Salvage Inventory~s~\n" +
-                $"Copper Scrap: {_copperScrap}\n" +
-                $"Electronic Components: " +
-                $"{_electronicComponents}\n" +
-                $"Gold-Plated Contacts: " +
-                $"{_goldPlatedContacts}"
-            );
         }
 
         private void DeleteLootDrops()
@@ -2555,12 +2701,53 @@ namespace FlockSurveillance
             }
         }
 
+        private void UpdateControlPanelPauseState()
+        {
+            if (_controlPanelPool.AreAnyVisible)
+            {
+                if (
+                    !_controlPanelOwnsPause &&
+                    !Game.IsPaused
+                )
+                {
+                    Game.Pause(true);
+                    _controlPanelOwnsPause = true;
+                }
+
+                return;
+            }
+
+            ReleaseControlPanelPause();
+        }
+
+        private void ReleaseControlPanelPause()
+        {
+            if (!_controlPanelOwnsPause)
+            {
+                return;
+            }
+
+            _controlPanelOwnsPause = false;
+
+            try
+            {
+                Game.Pause(false);
+            }
+            catch
+            {
+                // Script shutdown can make game-state natives unavailable.
+            }
+        }
+
 
         private bool TryToggleControlPanelFromController()
         {
             if (
                 _photoLab.IsBusy ||
-                Game.IsPaused
+                (
+                    Game.IsPaused &&
+                    !_controlPanelOwnsPause
+                )
             )
             {
                 return false;
@@ -2690,6 +2877,11 @@ namespace FlockSurveillance
             _totalDestroyedStat.AltTitle =
                 _stats.TotalCamerasDestroyed.ToString("N0");
 
+            _fastestThreeStat.AltTitle =
+                FormatRecordTime(
+                    _stats.FastestThreeCamerasSeconds
+                );
+
             _fastestTenStat.AltTitle =
                 FormatRecordTime(
                     _stats.FastestTenCamerasSeconds
@@ -2713,12 +2905,6 @@ namespace FlockSurveillance
 
             _cameraSightingsStat.AltTitle =
                 _stats.TotalCameraSightings.ToString("N0");
-
-            _photosRenderedStat.AltTitle =
-                _stats.TotalPhotosRendered.ToString("N0");
-
-            _photosWaitingStat.AltTitle =
-                _photoLab.PhotosWaitingInQueue.ToString("N0");
         }
 
         private static string FormatRecordTime(
@@ -2771,8 +2957,342 @@ namespace FlockSurveillance
 
         private void OnPhotoGenerated()
         {
-            _stats.TotalPhotosRendered++;
-            SaveStats();
+            _photoMetricsDirtyAfterRender = true;
+
+            if (!_photoLab.IsBusy)
+            {
+                _photoMetricsDirtyAfterRender = false;
+                RequestPhotoMetricsRefresh();
+            }
+        }
+
+        private void OnCapturePhotosChanged(
+            object sender,
+            EventArgs e
+        )
+        {
+            _capturePhotosEnabled =
+                _capturePhotosItem.Checked;
+        }
+
+        private void OnCctvShaderChanged(
+            object sender,
+            EventArgs e
+        )
+        {
+            _photoLab.CctvEffectEnabled =
+                _cctvShaderItem.Checked;
+        }
+
+        private void OnCctvStrengthChanged(
+            object sender,
+            EventArgs e
+        )
+        {
+            UpdateCctvStrengthFromMenu();
+        }
+
+        private void UpdateCctvStrengthFromMenu()
+        {
+            float strength =
+                MinimumCctvStrength +
+                (
+                    _cctvStrengthItem.Value *
+                    CctvStrengthStep
+                );
+
+            _photoLab.CctvEffectStrength =
+                strength;
+
+            _cctvStrengthItem.Title =
+                "CCTV Strength: " +
+                strength.ToString("0.##");
+        }
+
+        private void OnStartRenderActivated(
+            object sender,
+            EventArgs e
+        )
+        {
+            _controlPanelPool.HideAll();
+            ReleaseControlPanelPause();
+            TogglePhotoQueueRendering();
+        }
+
+        private void TogglePhotoQueueRendering()
+        {
+            if (_photoLab.IsBusy)
+            {
+                _photoLab.RequestCancel();
+                return;
+            }
+
+            if (!_photoLab.RequestLatestUnrenderedScene())
+            {
+                GTA.UI.Notification.Show(
+                    "~r~Photo Lab~s~: " +
+                    _photoLab.LastError
+                );
+            }
+        }
+
+        private void OnSharePhotosChanged(
+            object sender,
+            EventArgs e
+        )
+        {
+            _sharePhotosOptIn =
+                _sharePhotosItem.Checked;
+        }
+
+        private void OnPhotosMenuShown(
+            object sender,
+            EventArgs e
+        )
+        {
+            RequestPhotoMetricsRefresh();
+        }
+
+        private void RequestPhotoMetricsRefresh()
+        {
+            _photoMetricsRefreshQueued = true;
+            StartPhotoMetricsRefreshIfNeeded();
+        }
+
+        private void StartPhotoMetricsRefreshIfNeeded()
+        {
+            if (
+                !_photoMetricsRefreshQueued ||
+                _photoMetricsTask != null
+            )
+            {
+                return;
+            }
+
+            _photoMetricsRefreshQueued = false;
+
+            _estimatedQueueTimeItem.Description =
+                "Scanning the photo library in the background...";
+
+            _photoMetricsTask = Task.Run(
+                () =>
+                {
+                    int generatedPhotoCount;
+                    int pendingPhotoCount;
+                    long captureFolderBytes;
+                    string error;
+
+                    bool succeeded =
+                        _photoLab.TryGetLibraryMetrics(
+                            out generatedPhotoCount,
+                            out pendingPhotoCount,
+                            out captureFolderBytes,
+                            out error
+                        );
+
+                    return new PhotoMetricsResult
+                    {
+                        Succeeded = succeeded,
+                        GeneratedPhotoCount =
+                            generatedPhotoCount,
+                        PendingPhotoCount =
+                            pendingPhotoCount,
+                        CaptureFolderBytes =
+                            captureFolderBytes,
+                        Error = error
+                    };
+                }
+            );
+        }
+
+        private void PumpPhotoMetricsRefresh()
+        {
+            if (_photoMetricsTask == null)
+            {
+                StartPhotoMetricsRefreshIfNeeded();
+                return;
+            }
+
+            if (!_photoMetricsTask.IsCompleted)
+            {
+                return;
+            }
+
+            PhotoMetricsResult result;
+
+            try
+            {
+                result = _photoMetricsTask
+                    .GetAwaiter()
+                    .GetResult();
+            }
+            catch (Exception exception)
+            {
+                result = new PhotoMetricsResult
+                {
+                    Succeeded = false,
+                    Error =
+                        "Could not measure Photo Lab storage: " +
+                        exception.Message
+                };
+            }
+
+            _photoMetricsTask = null;
+            ApplyPhotoMetricsResult(result);
+            StartPhotoMetricsRefreshIfNeeded();
+        }
+
+        private void ApplyPhotoMetricsResult(
+            PhotoMetricsResult result
+        )
+        {
+            if (
+                result == null ||
+                !result.Succeeded
+            )
+            {
+                _estimatedQueueTimeItem.Description =
+                    result?.Error ??
+                    "Photo queue information is temporarily unavailable.";
+
+                return;
+            }
+
+            _generatedPhotosItem.AltTitle =
+                result.GeneratedPhotoCount.ToString("N0");
+
+            double estimatedMinutes =
+                result.PendingPhotoCount /
+                EstimatedPhotosPerMinute;
+
+            _estimatedQueueTimeItem.AltTitle =
+                FormatEstimatedMinutes(
+                    estimatedMinutes,
+                    result.PendingPhotoCount
+                );
+
+            _estimatedQueueTimeItem.Description =
+                result.PendingPhotoCount.ToString("N0") +
+                " photo" +
+                (
+                    result.PendingPhotoCount == 1
+                        ? ""
+                        : "s"
+                ) +
+                " waiting, estimated at 12 photos per minute.";
+
+            _queuedPhotosItem.AltTitle =
+                result.PendingPhotoCount.ToString("N0");
+
+            _photoInformationItem.Description =
+                "- Photos are stored at " +
+                _photoLab.PhotoDirectory +
+                "~n~- Photo rendering can be interrupted and " +
+                "continued whenever, so the queue can be completed in batches." +
+                "~n~- Current capture folder size: " +
+                FormatFileSize(
+                    result.CaptureFolderBytes
+                );
+        }
+
+        private static string FormatEstimatedMinutes(
+            double estimatedMinutes,
+            int pendingPhotoCount
+        )
+        {
+            if (pendingPhotoCount <= 0)
+            {
+                return "0 min";
+            }
+
+            if (estimatedMinutes < 0.1d)
+            {
+                return "< 0.1 min";
+            }
+
+            return estimatedMinutes.ToString("0.0") +
+                " min";
+        }
+
+        private static string FormatFileSize(
+            long bytes
+        )
+        {
+            string[] units =
+            {
+                "B",
+                "KB",
+                "MB",
+                "GB",
+                "TB"
+            };
+
+            double value = Math.Max(0L, bytes);
+            int unitIndex = 0;
+
+            while (
+                value >= 1024d &&
+                unitIndex < units.Length - 1
+            )
+            {
+                value /= 1024d;
+                unitIndex++;
+            }
+
+            string format =
+                unitIndex == 0
+                    ? "0"
+                    : "0.0";
+
+            return value.ToString(format) +
+                " " +
+                units[unitIndex];
+        }
+
+        private void RefreshCameraCatalogIdentity()
+        {
+            HashSet<string> uniqueCameraIds =
+                new HashSet<string>(
+                    StringComparer.Ordinal
+                );
+
+            foreach (
+                CameraDefinition definition
+                in _cameraDefinitions
+            )
+            {
+                if (
+                    definition != null &&
+                    !string.IsNullOrWhiteSpace(
+                        definition.FlockCameraId
+                    )
+                )
+                {
+                    uniqueCameraIds.Add(
+                        definition.FlockCameraId.Trim()
+                    );
+                }
+            }
+
+            _cameraCatalogSize =
+                uniqueCameraIds.Count;
+
+            _cameraCatalogId =
+                SurveillanceStatsData.BuildCameraCatalogId(
+                    uniqueCameraIds
+                );
+        }
+
+        private long GetStatsSessionElapsedMilliseconds()
+        {
+            long elapsedMilliseconds =
+                (long)Game.GameTime -
+                _statsSessionStartedAtGameTime;
+
+            return Math.Max(
+                0L,
+                elapsedMilliseconds
+            );
         }
     }
 }

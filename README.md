@@ -25,29 +25,59 @@ Install new YFT by
 
 
 TODO:
-- [] Persist cameras between script runs
-- [] Results screen / complete!
+- [] Check that cameras persist between script runs (check)
+- [] ~Results screen / complete!~
 - [] Remove debug f keys
-- [] Add controller controls (triple click left to activate/deactivate mod, triple click right to place test camera)
+- [x] Add controller controls (triple click left to activate/deactivate mod, triple click right to place test camera)
 - [] Remove props that intersect with cameras
+- [] Add cooldown for camera photos so that it doesnt take like 3 in 2s
+
 
 Control Panel:
-- Triple click to activate
-- Turn mod on/off
-- Reset cameras
-- Toggle debug view (FOV lines basically)
-- See stats
+- [] Change to F7 or RB + X when still to activate
+- [x] Turn camera network on/off
+- [x] Reset cameras
+- [x] Toggle debug view (FOV lines basically)
+- [x] See stats
 - Photo Section
-- - Toggle Photos on/off
-- - Show N Camera Captures, X processed / Y queued
+- - [x] Toggle Photos on/off
+- - [x] Show N Camera Captures, X processed / Y queued
 - - Clear Photo Queue
-- - Process Photo Queue (show N screenshots ready)
+- - [x] Process Photo Queue (show N screenshots ready)
+- - [] Say "will take ~10s to start up" for photo queue
+- - [] Make background process update the Photos stats live when done and the menu is open 
 
 Image stuff:
-- Clear out JSON captures on successful image generation
-- Add GTALPR Overlay to image capture
-- Add an on-collision hit image capture? or maybe the frame or two after destruction? This shouldnt need a script generation thing we can probably just scrape it from the in-game gamera 
+- [] Clear out JSON captures on successful image generation
+- [] Maybe move captures + pictures to one big folder
+- [x] Add GTALPR Overlay to image capture
+- [] Add an on-collision hit image capture? or maybe the frame or two after destruction? This shouldnt need a script generation thing we can probably just scrape it from the in-game gamera 
 - 
+
+
+Assumptions to test:
+- [] Need 300f distance from place to take picture (could we just teleport someone?)
+- [] No faster way to render the images
+- [] Weapons can damage the poles
+
+To fix:
+- [] Debounce cameras by 2s 
+- [] Menu title should be in font 7 (centered, white on black)
+
+To add:
+- [] Place camera like menyoo
+- [] Contest info 
+- [] Mod command info
+- [] Startup time info re:render pipeline
+- [] Learn more info
+- [] Credit to me in banner
+
+
+Package stuff:
+- [] Get prop into own droppable folder
+- [] Audit script for relative filesystem stuff that oculd be unique to me
+- [] ??
+
 
 
 ** CONTRIBUTING:
