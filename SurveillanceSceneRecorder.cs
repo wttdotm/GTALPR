@@ -5,7 +5,9 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
 using GTA;
@@ -2192,7 +2194,7 @@ namespace FlockSurveillance
                 : "camera";
             string fileName =
                 builder.Snapshot.SnapshotId + "_" +
-                SanitizeFileNamePart(firstCameraId) + ".json";
+                SanitizeFileNamePart(firstCameraId) + ".json.gz";
             string dateDirectory = builder.Snapshot.CapturedAtUtc.Substring(
                 0,
                 10
@@ -2239,7 +2241,31 @@ namespace FlockSurveillance
                     try
                     {
                         string json = serializer.Serialize(job.Snapshot);
-                        File.WriteAllText(temporaryPath, json);
+
+                        using (
+                            FileStream stream = new FileStream(
+                                temporaryPath,
+                                FileMode.CreateNew,
+                                FileAccess.Write,
+                                FileShare.None
+                            )
+                        )
+                        using (
+                            GZipStream gzip = new GZipStream(
+                                stream,
+                                CompressionLevel.Optimal
+                            )
+                        )
+                        using (
+                            StreamWriter writer = new StreamWriter(
+                                gzip,
+                                new UTF8Encoding(false)
+                            )
+                        )
+                        {
+                            writer.Write(json);
+                        }
+
                         File.Move(temporaryPath, job.OutputPath);
                         Volatile.Write(ref _lastSavedPath, job.OutputPath);
                     }

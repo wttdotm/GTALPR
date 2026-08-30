@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Text;
 using System.Web.Script.Serialization;
 using GTA.Math;
 
@@ -46,11 +49,9 @@ namespace FlockSurveillance
                     return false;
                 }
 
-                if (info.Length <= 0 || info.Length > MaximumManifestBytes)
+                if (info.Length <= 0)
                 {
-                    error =
-                        "The scene manifest is empty or exceeds the " +
-                        "16 MB safety limit.";
+                    error = "The scene manifest is empty.";
                     return false;
                 }
 
@@ -64,9 +65,21 @@ namespace FlockSurveillance
                         FileShare.ReadWrite | FileShare.Delete
                     )
                 )
-                using (StreamReader reader = new StreamReader(stream))
                 {
-                    json = reader.ReadToEnd();
+                    Stream manifestStream = stream;
+
+                    if (IsGzipManifestPath(fullPath))
+                    {
+                        manifestStream = new GZipStream(
+                            stream,
+                            CompressionMode.Decompress
+                        );
+                    }
+
+                    using (manifestStream)
+                    {
+                        json = ReadManifestText(manifestStream);
+                    }
                 }
 
                 JavaScriptSerializer serializer =
@@ -94,6 +107,77 @@ namespace FlockSurveillance
                 scene = null;
                 return false;
             }
+        }
+
+        private static string ReadManifestText(Stream stream)
+        {
+            byte[] buffer = new byte[81920];
+
+            using (MemoryStream contents = new MemoryStream())
+            {
+                while (true)
+                {
+                    int read = stream.Read(buffer, 0, buffer.Length);
+
+                    if (read <= 0)
+                    {
+                        break;
+                    }
+
+                    if (contents.Length + read > MaximumManifestBytes)
+                    {
+                        throw new InvalidDataException(
+                            "The decompressed scene manifest exceeds the " +
+                            "16 MB safety limit."
+                        );
+                    }
+
+                    contents.Write(buffer, 0, read);
+                }
+
+                if (contents.Length == 0)
+                {
+                    throw new InvalidDataException(
+                        "The scene manifest is empty."
+                    );
+                }
+
+                contents.Position = 0;
+
+                using (
+                    StreamReader reader = new StreamReader(
+                        contents,
+                        Encoding.UTF8,
+                        true
+                    )
+                )
+                {
+                    return reader.ReadToEnd();
+                }
+            }
+        }
+
+        internal static bool IsManifestPath(string path)
+        {
+            return
+                path != null &&
+                (
+                    path.EndsWith(
+                        ".json",
+                        StringComparison.OrdinalIgnoreCase
+                    ) ||
+                    IsGzipManifestPath(path)
+                );
+        }
+
+        private static bool IsGzipManifestPath(string path)
+        {
+            return
+                path != null &&
+                path.EndsWith(
+                    ".json.gz",
+                    StringComparison.OrdinalIgnoreCase
+                );
         }
 
         private static bool ValidateAndNormalize(
@@ -534,33 +618,45 @@ namespace FlockSurveillance
                 return false;
             }
 
-            DateTime capturedAt = DateTime.Parse(
-                scene.CapturedAtUtc,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind
-            ).ToUniversalTime();
-
-            string dateDirectory = Path.Combine(
-                Path.GetFullPath(photoRoot),
-                capturedAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            return TryCreateFromScene(
+                manifestPath,
+                scene,
+                photoRoot,
+                out plan,
+                out error,
+                out result
             );
+        }
 
-            string safeSnapshotId = SanitizeFilePart(scene.SnapshotId, 80);
+        internal static bool TryCreateFromScene(
+            string manifestPath,
+            SceneSnapshotDto scene,
+            string photoRoot,
+            out SurveillancePhotoScenePlan plan,
+            out string error,
+            out SurveillancePhotoScenePlanResult result
+        )
+        {
+            plan = null;
+            result = SurveillancePhotoScenePlanResult.Invalid;
+
+            if (scene == null)
+            {
+                error = "The scene manifest did not contain a scene.";
+                return false;
+            }
+
             List<SurveillancePhotoViewPlan> missingViews =
                 new List<SurveillancePhotoViewPlan>();
+            List<string> expectedOutputPaths = GetExpectedOutputPaths(
+                scene,
+                photoRoot
+            );
 
             for (int index = 0; index < scene.Views.Count; index++)
             {
                 SceneCameraViewDto view = scene.Views[index];
-                string safeCameraId = SanitizeFilePart(view.CameraId, 80);
-                string fileName = string.Format(
-                    CultureInfo.InvariantCulture,
-                    "{0}__v{1:D2}__{2}.jpg",
-                    safeSnapshotId,
-                    index + 1,
-                    safeCameraId
-                );
-                string outputPath = Path.Combine(dateDirectory, fileName);
+                string outputPath = expectedOutputPaths[index];
 
                 if (!File.Exists(outputPath))
                 {
@@ -617,6 +713,40 @@ namespace FlockSurveillance
             error = null;
             result = SurveillancePhotoScenePlanResult.Ready;
             return true;
+        }
+
+        internal static List<string> GetExpectedOutputPaths(
+            SceneSnapshotDto scene,
+            string photoRoot
+        )
+        {
+            DateTime capturedAt = DateTime.Parse(
+                scene.CapturedAtUtc,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind
+            ).ToUniversalTime();
+            string dateDirectory = Path.Combine(
+                Path.GetFullPath(photoRoot),
+                capturedAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            );
+            string safeSnapshotId = SanitizeFilePart(scene.SnapshotId, 80);
+            List<string> paths = new List<string>(scene.Views.Count);
+
+            for (int index = 0; index < scene.Views.Count; index++)
+            {
+                SceneCameraViewDto view = scene.Views[index];
+                string safeCameraId = SanitizeFilePart(view.CameraId, 80);
+                string fileName = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}__v{1:D2}__{2}.jpg",
+                    safeSnapshotId,
+                    index + 1,
+                    safeCameraId
+                );
+                paths.Add(Path.Combine(dateDirectory, fileName));
+            }
+
+            return paths;
         }
 
         private static Vector3 ComputeCenter(
@@ -789,8 +919,29 @@ namespace FlockSurveillance
             out string error
         )
         {
+            SurveillancePhotoDiscoveryStatistics ignored;
+            return TryDiscover(
+                sceneDirectory,
+                photoDirectory,
+                null,
+                out batch,
+                out error,
+                out ignored
+            );
+        }
+
+        internal static bool TryDiscover(
+            string sceneDirectory,
+            string photoDirectory,
+            SurveillancePhotoDiscoveryCache cache,
+            out SurveillancePhotoBatchPlan batch,
+            out string error,
+            out SurveillancePhotoDiscoveryStatistics statistics
+        )
+        {
             batch = null;
             error = null;
+            statistics = new SurveillancePhotoDiscoveryStatistics();
 
             if (string.IsNullOrWhiteSpace(sceneDirectory) ||
                 !Directory.Exists(sceneDirectory))
@@ -803,12 +954,16 @@ namespace FlockSurveillance
 
             try
             {
-                candidates = Directory
-                    .EnumerateFiles(
+                candidates = SelectUniqueManifestPaths(
+                    Directory.EnumerateFiles(
                         sceneDirectory,
-                        "*.json",
+                        "*",
                         SearchOption.AllDirectories
                     )
+                    .Where(
+                        SurveillancePhotoLabManifestReader.IsManifestPath
+                    )
+                )
                     .OrderBy(
                         path => path,
                         StringComparer.OrdinalIgnoreCase
@@ -821,6 +976,26 @@ namespace FlockSurveillance
                     "Could not enumerate scene manifests: " +
                     exception.Message;
                 return false;
+            }
+
+            statistics.CandidateCount = candidates.Count;
+            statistics.GzipJsonCount = candidates.Count(path =>
+                path.EndsWith(
+                    ".json.gz",
+                    StringComparison.OrdinalIgnoreCase
+                )
+            );
+            statistics.PlainJsonCount =
+                candidates.Count - statistics.GzipJsonCount;
+
+            if (cache != null)
+            {
+                HashSet<string> activePaths = new HashSet<string>(
+                    candidates.Select(Path.GetFullPath),
+                    StringComparer.OrdinalIgnoreCase
+                );
+                statistics.CacheEvictionCount =
+                    cache.RetainOnly(activePaths);
             }
 
             if (candidates.Count == 0)
@@ -837,20 +1012,122 @@ namespace FlockSurveillance
 
             foreach (string manifestPath in candidates)
             {
-                SurveillancePhotoScenePlan scene;
-                string candidateError;
-                SurveillancePhotoScenePlanResult result;
+                SurveillancePhotoScenePlan scene = null;
+                SceneSnapshotDto snapshot = null;
+                string candidateError = null;
+                SurveillancePhotoScenePlanResult result =
+                    SurveillancePhotoScenePlanResult.Invalid;
                 bool ready = false;
 
                 try
                 {
-                    ready = SurveillancePhotoScenePlan.TryCreate(
-                        manifestPath,
-                        photoDirectory,
-                        out scene,
-                        out candidateError,
-                        out result
+                    FileInfo file = new FileInfo(
+                        Path.GetFullPath(manifestPath)
                     );
+                    string cachedInvalidError = null;
+                    bool cachedAlreadyRendered = false;
+                    bool cacheHit = cache != null && cache.TryGet(
+                        file,
+                        out snapshot,
+                        out cachedInvalidError,
+                        out cachedAlreadyRendered
+                    );
+
+                    if (cacheHit)
+                    {
+                        statistics.CacheHitCount++;
+
+                        if (cachedAlreadyRendered)
+                        {
+                            result =
+                                SurveillancePhotoScenePlanResult.
+                                    AlreadyRendered;
+                            candidateError =
+                                "Every camera view in this scene already " +
+                                "has a JPG.";
+                        }
+                        else if (snapshot == null)
+                        {
+                            result =
+                                SurveillancePhotoScenePlanResult.Invalid;
+                            candidateError = cachedInvalidError ??
+                                "The cached scene manifest is invalid.";
+                        }
+                        else
+                        {
+                            Stopwatch planning = Stopwatch.StartNew();
+                            ready =
+                                SurveillancePhotoScenePlan.
+                                    TryCreateFromScene(
+                                        manifestPath,
+                                        snapshot,
+                                        photoDirectory,
+                                        out scene,
+                                        out candidateError,
+                                        out result
+                                    );
+                            planning.Stop();
+                            statistics.PlanningMilliseconds +=
+                                planning.Elapsed.TotalMilliseconds;
+                        }
+                    }
+                    else
+                    {
+                        statistics.CacheMissCount++;
+                        statistics.ManifestBytesRead += file.Length;
+                        Stopwatch parsing = Stopwatch.StartNew();
+                        bool loaded =
+                            SurveillancePhotoLabManifestReader.TryLoad(
+                                manifestPath,
+                                out snapshot,
+                                out candidateError
+                            );
+                        parsing.Stop();
+                        statistics.ParseMilliseconds +=
+                            parsing.Elapsed.TotalMilliseconds;
+
+                        if (!loaded)
+                        {
+                            cache?.StoreInvalid(file, candidateError);
+                            result =
+                                SurveillancePhotoScenePlanResult.Invalid;
+                        }
+                        else
+                        {
+                            cache?.StoreScene(file, snapshot);
+                            Stopwatch planning = Stopwatch.StartNew();
+                            ready =
+                                SurveillancePhotoScenePlan.
+                                    TryCreateFromScene(
+                                        manifestPath,
+                                        snapshot,
+                                        photoDirectory,
+                                        out scene,
+                                        out candidateError,
+                                        out result
+                                    );
+                            planning.Stop();
+                            statistics.PlanningMilliseconds +=
+                                planning.Elapsed.TotalMilliseconds;
+                        }
+                    }
+
+                    if (
+                        cache != null &&
+                        snapshot != null &&
+                        result ==
+                            SurveillancePhotoScenePlanResult.AlreadyRendered
+                    )
+                    {
+                        cache.StoreCompleted(
+                            file,
+                            SurveillancePhotoScenePlan.
+                                GetExpectedOutputPaths(
+                                    snapshot,
+                                    photoDirectory
+                                )
+                        );
+                    }
                 }
                 catch (Exception exception)
                 {
@@ -980,6 +1257,44 @@ namespace FlockSurveillance
             }
 
             return false;
+        }
+
+        private static IEnumerable<string> SelectUniqueManifestPaths(
+            IEnumerable<string> paths
+        )
+        {
+            return paths
+                .GroupBy(
+                    GetManifestIdentity,
+                    StringComparer.OrdinalIgnoreCase
+                )
+                .Select(group =>
+                    group
+                        .OrderByDescending(path =>
+                            path.EndsWith(
+                                ".json.gz",
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
+                        .ThenBy(
+                            path => path,
+                            StringComparer.OrdinalIgnoreCase
+                        )
+                        .First()
+                );
+        }
+
+        private static string GetManifestIdentity(string path)
+        {
+            if (path.EndsWith(
+                ".json.gz",
+                StringComparison.OrdinalIgnoreCase
+            ))
+            {
+                return path.Substring(0, path.Length - ".json.gz".Length);
+            }
+
+            return path.Substring(0, path.Length - ".json".Length);
         }
     }
 

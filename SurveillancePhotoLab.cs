@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using GTA;
@@ -51,10 +52,24 @@ namespace FlockSurveillance
         private readonly string _photoDirectory;
         private readonly SurveillanceJpegCapture _jpegCapture =
             new SurveillanceJpegCapture();
+        private readonly SurveillancePhotoLabTelemetry _telemetry;
 
         private PhotoLabPhase _phase;
         private DateTime _phaseStartedUtc;
         private int _phaseStartedFrame;
+        private long _phaseStartedTimestamp;
+        private int _telemetryPhasePlanIndex = -1;
+        private int _telemetryPhaseViewIndex = -1;
+        private string _telemetryPhaseManifest;
+        private string _telemetryPhaseOutput;
+        private string _telemetryRunId;
+        private long _telemetryRunStartedTimestamp;
+        private long _telemetrySceneStartedTimestamp;
+        private long _telemetryViewStartedTimestamp;
+        private bool _telemetrySceneOpen;
+        private bool _telemetryFirstCopyRecorded;
+        private bool _telemetryFirstSaveRecorded;
+        private int _telemetryDroppedAtRunStart;
         private List<SurveillancePhotoScenePlan> _plans;
         private int _planIndex;
         private SurveillancePhotoScenePlan _plan;
@@ -90,6 +105,7 @@ namespace FlockSurveillance
         private bool _encoderCreatedNewFile;
         private string _encoderOutputPath;
         private string _encoderError;
+        private SurveillanceJpegCaptureTiming _encoderTiming;
         private bool _showNextCaptureLoadingPrompt;
         private bool _loadingPromptOwned;
         private bool _cancelKeyboardWasDown;
@@ -132,6 +148,15 @@ namespace FlockSurveillance
 
             _sceneDirectory = Path.GetFullPath(sceneDirectory);
             _photoDirectory = Path.GetFullPath(photoDirectory);
+            string photoParent = Path.GetDirectoryName(_photoDirectory);
+            _telemetry = new SurveillancePhotoLabTelemetry(
+                Path.Combine(
+                    string.IsNullOrWhiteSpace(photoParent)
+                        ? _photoDirectory
+                        : photoParent,
+                    "Logs"
+                )
+            );
             Status = "Photo Lab is idle.";
         }
 
@@ -140,6 +165,8 @@ namespace FlockSurveillance
         public string SceneDirectory => _sceneDirectory;
 
         public string PhotoDirectory => _photoDirectory;
+
+        public string TelemetryDirectory => _telemetry.OutputDirectory;
 
         public string Status { get; private set; }
 
@@ -192,6 +219,32 @@ namespace FlockSurveillance
             out string error
         )
         {
+            SurveillancePhotoBatchPlan ignoredBatch;
+            SurveillancePhotoDiscoveryStatistics ignoredStatistics;
+            return TryGetLibraryMetrics(
+                null,
+                out ignoredBatch,
+                out ignoredStatistics,
+                out generatedPhotoCount,
+                out pendingPhotoCount,
+                out captureFolderBytes,
+                out error
+            );
+        }
+
+        internal bool TryGetLibraryMetrics(
+            SurveillancePhotoDiscoveryCache cache,
+            out SurveillancePhotoBatchPlan batch,
+            out SurveillancePhotoDiscoveryStatistics discoveryStatistics,
+            out int generatedPhotoCount,
+            out int pendingPhotoCount,
+            out long captureFolderBytes,
+            out string error
+        )
+        {
+            batch = null;
+            discoveryStatistics =
+                new SurveillancePhotoDiscoveryStatistics();
             generatedPhotoCount = 0;
             pendingPhotoCount = 0;
             captureFolderBytes = 0L;
@@ -225,14 +278,15 @@ namespace FlockSurveillance
                     return true;
                 }
 
-                SurveillancePhotoBatchPlan batch;
                 string discoveryError;
 
                 SurveillancePhotoBatchPlan.TryDiscover(
                     _sceneDirectory,
                     _photoDirectory,
+                    cache,
                     out batch,
-                    out discoveryError
+                    out discoveryError,
+                    out discoveryStatistics
                 );
 
                 if (batch != null)
@@ -255,13 +309,18 @@ namespace FlockSurveillance
                     string ignored
                     in Directory.EnumerateFiles(
                         _sceneDirectory,
-                        "*.json",
+                        "*",
                         SearchOption.AllDirectories
                     )
                 )
                 {
-                    hasManifest = true;
-                    break;
+                    if (SurveillancePhotoLabManifestReader.IsManifestPath(
+                        ignored
+                    ))
+                    {
+                        hasManifest = true;
+                        break;
+                    }
                 }
 
                 if (!hasManifest)
@@ -282,6 +341,61 @@ namespace FlockSurveillance
 
                 return false;
             }
+        }
+
+        internal void RecordDiscoveryTelemetry(
+            int generation,
+            bool succeeded,
+            double durationMilliseconds,
+            double workerDurationMilliseconds,
+            SurveillancePhotoDiscoveryStatistics statistics,
+            SurveillancePhotoBatchPlan batch,
+            int generatedPhotoCount,
+            int pendingPhotoCount,
+            long captureFolderBytes,
+            string error
+        )
+        {
+            SurveillancePhotoDiscoveryStatistics measured =
+                statistics ?? new SurveillancePhotoDiscoveryStatistics();
+            Dictionary<string, object> values =
+                new Dictionary<string, object>
+                {
+                    { "generation", generation },
+                    { "succeeded", succeeded },
+                    { "request_to_ready_ms", durationMilliseconds },
+                    { "worker_duration_ms", workerDurationMilliseconds },
+                    { "candidates", measured.CandidateCount },
+                    { "plain_json", measured.PlainJsonCount },
+                    { "gzip_json", measured.GzipJsonCount },
+                    { "cache_hits", measured.CacheHitCount },
+                    { "cache_misses", measured.CacheMissCount },
+                    { "cache_evictions", measured.CacheEvictionCount },
+                    { "manifest_bytes_read", measured.ManifestBytesRead },
+                    { "parse_ms", measured.ParseMilliseconds },
+                    { "planning_ms", measured.PlanningMilliseconds },
+                    { "generated_photos", generatedPhotoCount },
+                    { "pending_photos", pendingPhotoCount },
+                    { "capture_folder_bytes", captureFolderBytes },
+                    { "queued_scenes", batch?.Scenes.Count ?? 0 },
+                    { "invalid_manifests", batch?.InvalidManifestCount ?? 0 },
+                    {
+                        "already_rendered_manifests",
+                        batch?.AlreadyRenderedManifestCount ?? 0
+                    },
+                    {
+                        "colliding_manifests",
+                        batch?.CollidingManifestCount ?? 0
+                    },
+                    { "error", error }
+                };
+
+            _telemetry.Record(
+                "discovery_complete",
+                null,
+                values,
+                true
+            );
         }
 
         private static void AccumulateDirectoryMetrics(
@@ -306,25 +420,41 @@ namespace FlockSurveillance
                 )
             )
             {
-                FileInfo file = new FileInfo(path);
-
-                if (!countedFiles.Add(file.FullName))
+                try
                 {
-                    continue;
-                }
+                    FileInfo file = new FileInfo(path);
 
-                captureFolderBytes += file.Length;
+                    if (!countedFiles.Add(file.FullName))
+                    {
+                        continue;
+                    }
 
-                if (
-                    countJpegs &&
-                    string.Equals(
-                        file.Extension,
-                        ".jpg",
-                        StringComparison.OrdinalIgnoreCase
+                    captureFolderBytes += file.Length;
+
+                    if (
+                        countJpegs &&
+                        string.Equals(
+                            file.Extension,
+                            ".jpg",
+                            StringComparison.OrdinalIgnoreCase
+                        )
                     )
-                )
+                    {
+                        generatedPhotoCount++;
+                    }
+                }
+                catch (FileNotFoundException)
                 {
-                    generatedPhotoCount++;
+                    // The recorder publishes with an atomic move, so a temp
+                    // file can disappear between enumeration and metadata.
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    // The containing date folder was removed during a scan.
+                }
+                catch (IOException)
+                {
+                    // A transient file race should not disable Photo Lab.
                 }
             }
         }
@@ -394,6 +524,28 @@ namespace FlockSurveillance
         }
 
         /// <summary>
+        /// Starts a batch prepared by the background library discovery task.
+        /// GTA state validation remains on the script thread, while the
+        /// expensive filesystem and JSON work is not repeated here.
+        /// </summary>
+        internal bool RequestDiscoveredBatch(
+            SurveillancePhotoBatchPlan batch,
+            long requestedTimestamp = 0L
+        )
+        {
+            string error;
+
+            if (!CanStart(out error))
+            {
+                LastError = error;
+                Status = error;
+                return false;
+            }
+
+            return Start(batch, true, requestedTimestamp);
+        }
+
+        /// <summary>
         /// Renders a specific manifest. Existing JPG views are skipped.
         /// </summary>
         public bool RequestScene(string manifestPath)
@@ -435,6 +587,15 @@ namespace FlockSurveillance
         {
             if (IsBusy)
             {
+                if (!_cancelRequested && _telemetryRunId != null)
+                {
+                    _telemetry.Record(
+                        "cancel_requested",
+                        _telemetryRunId,
+                        BuildTelemetryContext()
+                    );
+                }
+
                 _cancelRequested = true;
             }
         }
@@ -610,17 +771,29 @@ namespace FlockSurveillance
 
             if (wasBusy)
             {
-                ForceCleanupAndRestore();
+                try
+                {
+                    CompleteTelemetryRun(
+                        "disposed",
+                        "Photo Lab was disposed during an active render."
+                    );
+                }
+                finally
+                {
+                    ForceCleanupAndRestore();
+                }
             }
 
             StopOwnedLoadingPrompt();
             _jpegCapture.Dispose();
+            _telemetry.Dispose();
             _phase = PhotoLabPhase.Idle;
         }
 
         private bool Start(
             SurveillancePhotoBatchPlan batch,
-            bool skipNearbyScenes
+            bool skipNearbyScenes,
+            long requestedTimestamp = 0L
         )
         {
             try
@@ -727,6 +900,7 @@ namespace FlockSurveillance
                 _encoderCreatedNewFile = false;
                 _encoderOutputPath = null;
                 _encoderError = null;
+                _encoderTiming = null;
                 _showNextCaptureLoadingPrompt = false;
                 _cancelKeyboardWasDown =
                     Game.IsKeyPressed(WinFormsKeys.Escape) ||
@@ -738,6 +912,7 @@ namespace FlockSurveillance
                 LastError = null;
                 LastPhotoPath = null;
                 LastQualityWarning = null;
+                BeginTelemetryRun(batch, requestedTimestamp);
                 Status = string.Format(
                     CultureInfo.InvariantCulture,
                     "Photo Lab queued {0} JPG(s) from {1} scene(s). " +
@@ -760,6 +935,7 @@ namespace FlockSurveillance
                     "Could not start Photo Lab: " + exception.Message;
                 Status = LastError;
                 ForceCleanupAndRestore();
+                CompleteTelemetryRun("start_error", LastError);
                 ResetRunState();
                 return false;
             }
@@ -1061,6 +1237,10 @@ namespace FlockSurveillance
 
         private void BeginRemoteScene()
         {
+            long operationStarted =
+                SurveillancePhotoLabTelemetry.GetTimestamp();
+            BeginTelemetryScene();
+
             if (_worldApplied)
             {
                 throw new InvalidOperationException(
@@ -1095,6 +1275,10 @@ namespace FlockSurveillance
 
             if (!started)
             {
+                RecordTelemetryOperation(
+                    "remote_scene_setup",
+                    operationStarted
+                );
                 BeginCleanup(
                     "GTA could not start streaming the recorded scene.",
                     false
@@ -1103,6 +1287,10 @@ namespace FlockSurveillance
             }
 
             RequestCollision(_plan.Center);
+            RecordTelemetryOperation(
+                "remote_scene_setup",
+                operationStarted
+            );
             SetPhase(PhotoLabPhase.LoadingRemoteScene);
         }
 
@@ -1151,8 +1339,25 @@ namespace FlockSurveillance
                 return;
             }
 
+            long reconstructionStarted =
+                SurveillancePhotoLabTelemetry.GetTimestamp();
             _reconstructor = new SurveillanceSceneReconstructor(
                 _plan.Scene
+            );
+            RecordTelemetryOperation(
+                "reconstructor_plan",
+                reconstructionStarted,
+                new Dictionary<string, object>
+                {
+                    {
+                        "planned_models",
+                        _reconstructor.PlannedModelCount
+                    },
+                    {
+                        "planned_clones",
+                        _reconstructor.PlannedCloneCount
+                    }
+                }
             );
             Status = "Photo Lab is loading recorded entity models.";
             SetPhase(PhotoLabPhase.PreparingModels);
@@ -1186,6 +1391,8 @@ namespace FlockSurveillance
 
         private void SetupCurrentView()
         {
+            long operationStarted =
+                SurveillancePhotoLabTelemetry.GetTimestamp();
             ReleaseOwnedCamera();
             ApplyRecordedWeather(_plan.Scene.World);
 
@@ -1282,6 +1489,11 @@ namespace FlockSurveillance
                 _viewIndex + 1,
                 _plan.Views.Count
             );
+            _telemetryViewStartedTimestamp = operationStarted;
+            RecordTelemetryOperation(
+                "camera_setup",
+                operationStarted
+            );
             SetPhase(PhotoLabPhase.WarmingViewWhileBlack);
         }
 
@@ -1348,6 +1560,7 @@ namespace FlockSurveillance
                 _encoderCreatedNewFile = false;
                 _encoderOutputPath = viewPlan.OutputPath;
                 _encoderError = null;
+                _encoderTiming = null;
                 CreditCurrentEncoderResult();
                 _showNextCaptureLoadingPrompt = HasCaptureAfterCurrent();
                 Screen.FadeOut(FadeMilliseconds);
@@ -1373,17 +1586,47 @@ namespace FlockSurveillance
                 return;
             }
 
-            if (!_jpegCapture.TryBeginCapture(
+            long captureStarted =
+                SurveillancePhotoLabTelemetry.GetTimestamp();
+            bool captureBegan = _jpegCapture.TryBeginCapture(
                 viewPlan.OutputPath,
                 viewPlan.View.OutputWidth,
                 viewPlan.View.OutputHeight,
                 overlayMetadata,
                 out _pendingCaptureId,
+                out _encoderTiming,
                 out error
-            ))
+            );
+            RecordTelemetryOperation(
+                "screen_capture",
+                captureStarted,
+                BuildCaptureAttemptTelemetry(
+                    captureBegan,
+                    error,
+                    _encoderTiming
+                )
+            );
+
+            if (!captureBegan)
             {
                 BeginCleanup(error, false);
                 return;
+            }
+
+            if (!_telemetryFirstCopyRecorded)
+            {
+                _telemetryFirstCopyRecorded = true;
+                Dictionary<string, object> firstCopy =
+                    BuildTelemetryContext();
+                firstCopy["startup_to_first_copy_ms"] =
+                    SurveillancePhotoLabTelemetry.ElapsedMilliseconds(
+                        _telemetryRunStartedTimestamp
+                    );
+                _telemetry.Record(
+                    "first_pixel_copy",
+                    _telemetryRunId,
+                    firstCopy
+                );
             }
 
             _encoderResultReceived = false;
@@ -1469,6 +1712,9 @@ namespace FlockSurveillance
 
         private void BeginTransitionToNextScene()
         {
+            CompleteTelemetryScene("completed");
+            long cleanupStarted =
+                SurveillancePhotoLabTelemetry.GetTimestamp();
             // This method is only entered after both the JPEG result and a
             // fully black screen are confirmed.
             ReleaseOwnedCamera();
@@ -1488,6 +1734,11 @@ namespace FlockSurveillance
                 _worldApplied = false;
             }
 
+            RecordTelemetryOperation(
+                "scene_transition_cleanup",
+                cleanupStarted
+            );
+
             _planIndex++;
             _plan = _plans[_planIndex];
             _viewIndex = 0;
@@ -1498,6 +1749,7 @@ namespace FlockSurveillance
             _encoderCreatedNewFile = false;
             _encoderOutputPath = null;
             _encoderError = null;
+            _encoderTiming = null;
             Status = string.Format(
                 CultureInfo.InvariantCulture,
                 "Photo Lab is preparing scene {0}/{1}.",
@@ -1531,17 +1783,51 @@ namespace FlockSurveillance
             long resultId;
             string resultOutputPath;
             string resultError;
+            SurveillanceJpegCaptureTiming resultTiming;
 
             while (_jpegCapture.TryTakeResult(
                 out resultSucceeded,
                 out resultCreatedNewFile,
                 out resultId,
                 out resultOutputPath,
+                out resultTiming,
                 out resultError
             ))
             {
                 if (resultId != _pendingCaptureId)
                 {
+                    Dictionary<string, object> lateResult =
+                        new Dictionary<string, object>
+                        {
+                            { "capture_id", resultId },
+                            {
+                                "expected_capture_id",
+                                _pendingCaptureId
+                            },
+                            { "succeeded", resultSucceeded },
+                            {
+                                "created_new_file",
+                                resultCreatedNewFile
+                            },
+                            {
+                                "output",
+                                string.IsNullOrWhiteSpace(resultOutputPath)
+                                    ? null
+                                    : Path.GetFileName(resultOutputPath)
+                            },
+                            { "error", resultError }
+                        };
+                    AddCaptureTiming(
+                        lateResult,
+                        resultTiming,
+                        true,
+                        true
+                    );
+                    _telemetry.Record(
+                        "late_capture_result",
+                        null,
+                        lateResult
+                    );
                     continue;
                 }
 
@@ -1549,6 +1835,7 @@ namespace FlockSurveillance
                 _encoderCreatedNewFile = resultCreatedNewFile;
                 _encoderOutputPath = resultOutputPath;
                 _encoderError = resultError;
+                _encoderTiming = resultTiming;
                 _encoderResultReceived = true;
                 CreditCurrentEncoderResult();
                 return;
@@ -1564,6 +1851,33 @@ namespace FlockSurveillance
 
             _encoderResultCredited = true;
 
+            Dictionary<string, object> photoResult =
+                BuildTelemetryContext();
+            photoResult["succeeded"] = _encoderSucceeded;
+            photoResult["created_new_file"] =
+                _encoderCreatedNewFile;
+            photoResult["error"] = _encoderError;
+            photoResult["view_total_ms"] =
+                SurveillancePhotoLabTelemetry.ElapsedMilliseconds(
+                    _telemetryViewStartedTimestamp
+                );
+
+            if (_encoderTiming != null)
+            {
+                AddCaptureTiming(
+                    photoResult,
+                    _encoderTiming,
+                    true,
+                    true
+                );
+            }
+
+            _telemetry.Record(
+                "photo_result",
+                _telemetryRunId,
+                photoResult
+            );
+
             if (!_encoderSucceeded)
             {
                 return;
@@ -1571,6 +1885,22 @@ namespace FlockSurveillance
 
             if (_encoderCreatedNewFile)
             {
+                if (!_telemetryFirstSaveRecorded)
+                {
+                    _telemetryFirstSaveRecorded = true;
+                    Dictionary<string, object> firstSave =
+                        BuildTelemetryContext();
+                    firstSave["startup_to_first_save_ms"] =
+                        SurveillancePhotoLabTelemetry.ElapsedMilliseconds(
+                            _telemetryRunStartedTimestamp
+                        );
+                    _telemetry.Record(
+                        "first_jpg_saved",
+                        _telemetryRunId,
+                        firstSave
+                    );
+                }
+
                 LastPhotoPath = _encoderOutputPath;
                 _photosGeneratedThisRun++;
                 PhotoGenerated?.Invoke();
@@ -1590,6 +1920,13 @@ namespace FlockSurveillance
 
             _terminalError = error;
             _terminalCanceled = canceled;
+            CompleteTelemetryScene(
+                canceled
+                    ? "canceled"
+                    : string.IsNullOrWhiteSpace(error)
+                        ? "completed"
+                        : "failed"
+            );
             _showNextCaptureLoadingPrompt = false;
             StopOwnedLoadingPrompt();
             Status = canceled
@@ -1775,6 +2112,14 @@ namespace FlockSurveillance
             LastError = error;
             LastQualityWarning = BuildQualityWarning();
             string skipSummary = BuildBatchSkipSummary();
+            CompleteTelemetryRun(
+                canceled
+                    ? "canceled"
+                    : string.IsNullOrWhiteSpace(error)
+                        ? "completed"
+                        : "failed",
+                error
+            );
 
             if (canceled)
             {
@@ -2448,11 +2793,369 @@ namespace FlockSurveillance
                 _phase == PhotoLabPhase.FadingInGameplay;
         }
 
+        private static Dictionary<string, object>
+            BuildCaptureAttemptTelemetry(
+                bool succeeded,
+                string error,
+                SurveillanceJpegCaptureTiming timing
+            )
+        {
+            Dictionary<string, object> values =
+                new Dictionary<string, object>
+                {
+                    { "succeeded", succeeded },
+                    { "error", error }
+                };
+            AddCaptureTiming(values, timing, false, false);
+            return values;
+        }
+
+        private static void AddCaptureTiming(
+            IDictionary<string, object> values,
+            SurveillanceJpegCaptureTiming timing,
+            bool includeWorkerStages,
+            bool includeWorkerPollDelay
+        )
+        {
+            if (values == null || timing == null)
+            {
+                return;
+            }
+
+            values["capture_bounds_ms"] = timing.BoundsMilliseconds;
+            values["bitmap_allocation_ms"] =
+                timing.BitmapAllocationMilliseconds;
+            values["pixel_copy_ms"] = timing.PixelCopyMilliseconds;
+            values["blank_check_ms"] = timing.BlankCheckMilliseconds;
+            values["queue_insert_ms"] =
+                timing.QueueInsertionMilliseconds;
+            values["capture_main_thread_total_ms"] =
+                timing.MainThreadTotalMilliseconds;
+            if (includeWorkerStages)
+            {
+                values["worker_queue_wait_ms"] =
+                    timing.QueueWaitMilliseconds;
+                values["resize_ms"] = timing.ResizeMilliseconds;
+                values["overlay_ms"] = timing.OverlayMilliseconds;
+                values["codec_lookup_ms"] =
+                    timing.CodecLookupMilliseconds;
+                values["encode_and_temp_write_ms"] =
+                    timing.EncodeAndTemporaryWriteMilliseconds;
+                values["final_move_ms"] =
+                    timing.FinalMoveMilliseconds;
+                values["worker_total_ms"] =
+                    timing.WorkerTotalMilliseconds;
+            }
+
+            if (includeWorkerPollDelay)
+            {
+                values["worker_finished_to_poll_ms"] =
+                    timing.GetWorkerFinishedToPollMilliseconds();
+            }
+        }
+
+        private void BeginTelemetryRun(
+            SurveillancePhotoBatchPlan sourceBatch,
+            long requestedTimestamp
+        )
+        {
+            _telemetryRunId = Guid.NewGuid().ToString("N");
+            long initializedTimestamp =
+                SurveillancePhotoLabTelemetry.GetTimestamp();
+            _telemetryRunStartedTimestamp = requestedTimestamp > 0L
+                ? requestedTimestamp
+                : initializedTimestamp;
+            _telemetrySceneStartedTimestamp = 0L;
+            _telemetryViewStartedTimestamp = 0L;
+            _telemetrySceneOpen = false;
+            _telemetryFirstCopyRecorded = false;
+            _telemetryFirstSaveRecorded = false;
+            _telemetryDroppedAtRunStart =
+                _telemetry.DroppedEventCount;
+            _phaseStartedTimestamp = 0L;
+
+            _telemetry.Record(
+                "run_started",
+                _telemetryRunId,
+                new Dictionary<string, object>
+                {
+                    { "queued_photos", _photosQueuedThisRun },
+                    { "queued_scenes", _scenesQueuedThisRun },
+                    {
+                        "request_to_run_initialized_ms",
+                        (initializedTimestamp -
+                            _telemetryRunStartedTimestamp) *
+                            1000d /
+                            Stopwatch.Frequency
+                    },
+                    {
+                        "discovered_manifests",
+                        sourceBatch?.ManifestCount ?? 0
+                    },
+                    { "nearby_scenes_skipped", _nearbyManifestsSkippedThisRun },
+                    { "cctv_enabled", _cctvEffectEnabled },
+                    { "cctv_strength", _cctvEffectStrength }
+                }
+            );
+        }
+
+        private void BeginTelemetryScene()
+        {
+            if (_telemetryRunId == null || _telemetrySceneOpen)
+            {
+                return;
+            }
+
+            _telemetrySceneStartedTimestamp =
+                SurveillancePhotoLabTelemetry.GetTimestamp();
+            _telemetrySceneOpen = true;
+            _telemetry.Record(
+                "scene_started",
+                _telemetryRunId,
+                BuildTelemetryContext()
+            );
+        }
+
+        private void CompleteTelemetryScene(string outcome)
+        {
+            if (!_telemetrySceneOpen || _telemetryRunId == null)
+            {
+                return;
+            }
+
+            Dictionary<string, object> values = BuildTelemetryContext();
+            values["outcome"] = outcome;
+            values["scene_total_ms"] =
+                SurveillancePhotoLabTelemetry.ElapsedMilliseconds(
+                    _telemetrySceneStartedTimestamp
+                );
+
+            if (_reconstructor != null)
+            {
+                values["planned_models"] =
+                    _reconstructor.PlannedModelCount;
+                values["planned_clones"] =
+                    _reconstructor.PlannedCloneCount;
+                values["spawned_entities"] =
+                    _reconstructor.SpawnedEntityCount;
+                values["skipped_entities"] =
+                    _reconstructor.SkippedEntityCount;
+            }
+
+            _telemetry.Record(
+                "scene_completed",
+                _telemetryRunId,
+                values
+            );
+            _telemetrySceneOpen = false;
+            _telemetrySceneStartedTimestamp = 0L;
+        }
+
+        private void RecordTelemetryOperation(
+            string operation,
+            long startedTimestamp,
+            IDictionary<string, object> additionalValues = null
+        )
+        {
+            if (_telemetryRunId == null)
+            {
+                return;
+            }
+
+            Dictionary<string, object> values = BuildTelemetryContext();
+            values["operation"] = operation;
+            values["duration_ms"] =
+                SurveillancePhotoLabTelemetry.ElapsedMilliseconds(
+                    startedTimestamp
+                );
+
+            if (additionalValues != null)
+            {
+                foreach (
+                    KeyValuePair<string, object> pair
+                    in additionalValues
+                )
+                {
+                    values[pair.Key] = pair.Value;
+                }
+            }
+
+            _telemetry.Record(
+                "operation",
+                _telemetryRunId,
+                values
+            );
+        }
+
+        private Dictionary<string, object> BuildTelemetryContext()
+        {
+            Dictionary<string, object> values =
+                new Dictionary<string, object>
+                {
+                    { "phase", _phase.ToString() },
+                    {
+                        "scene_index",
+                        _plan == null ? 0 : _planIndex + 1
+                    },
+                    {
+                        "scene_count",
+                        _plans?.Count ?? 0
+                    },
+                    {
+                        "view_index",
+                        _plan == null ? 0 : _viewIndex + 1
+                    },
+                    {
+                        "view_count",
+                        _plan?.Views.Count ?? 0
+                    },
+                    {
+                        "manifest",
+                        _plan == null
+                            ? null
+                            : Path.GetFileName(_plan.ManifestPath)
+                    }
+                };
+
+            if (_plan != null &&
+                _viewIndex >= 0 &&
+                _viewIndex < _plan.Views.Count)
+            {
+                values["output"] = Path.GetFileName(
+                    _plan.Views[_viewIndex].OutputPath
+                );
+            }
+
+            return values;
+        }
+
+        private void RecordCurrentTelemetryPhase()
+        {
+            if (_telemetryRunId == null ||
+                _phase == PhotoLabPhase.Idle ||
+                _phaseStartedTimestamp <= 0L)
+            {
+                return;
+            }
+
+            Dictionary<string, object> values =
+                new Dictionary<string, object>
+                {
+                    { "phase", _phase.ToString() },
+                    {
+                        "duration_ms",
+                        SurveillancePhotoLabTelemetry.ElapsedMilliseconds(
+                            _phaseStartedTimestamp
+                        )
+                    },
+                    {
+                        "frames",
+                        unchecked(Game.FrameCount - _phaseStartedFrame)
+                    },
+                    {
+                        "scene_index",
+                        _telemetryPhasePlanIndex < 0
+                            ? 0
+                            : _telemetryPhasePlanIndex + 1
+                    },
+                    {
+                        "view_index",
+                        _telemetryPhaseViewIndex < 0
+                            ? 0
+                            : _telemetryPhaseViewIndex + 1
+                    },
+                    { "manifest", _telemetryPhaseManifest },
+                    { "output", _telemetryPhaseOutput }
+                };
+
+            _telemetry.Record(
+                "phase_completed",
+                _telemetryRunId,
+                values
+            );
+            _phaseStartedTimestamp = 0L;
+        }
+
+        private void CompleteTelemetryRun(
+            string outcome,
+            string error
+        )
+        {
+            if (_telemetryRunId == null)
+            {
+                return;
+            }
+
+            RecordCurrentTelemetryPhase();
+            CompleteTelemetryScene(outcome);
+            Dictionary<string, object> values =
+                new Dictionary<string, object>
+                {
+                    { "outcome", outcome },
+                    { "error", error },
+                    {
+                        "total_ms",
+                        SurveillancePhotoLabTelemetry.ElapsedMilliseconds(
+                            _telemetryRunStartedTimestamp
+                        )
+                    },
+                    { "queued_photos", _photosQueuedThisRun },
+                    { "generated_photos", _photosGeneratedThisRun },
+                    { "queued_scenes", _scenesQueuedThisRun },
+                    { "completed_scenes", _scenesCompletedThisRun },
+                    {
+                        "views_completed_elsewhere",
+                        _viewsCompletedElsewhereThisRun
+                    },
+                    {
+                        "reconstruction_skips",
+                        _reconstructionSkippedCount
+                    },
+                    {
+                        "reconstruction_warnings",
+                        _reconstructionWarningCount
+                    },
+                    {
+                        "telemetry_events_dropped",
+                        Math.Max(
+                            0,
+                            _telemetry.DroppedEventCount -
+                                _telemetryDroppedAtRunStart
+                        )
+                    }
+                };
+
+            _telemetry.Record(
+                "run_completed",
+                _telemetryRunId,
+                values,
+                true
+            );
+            _telemetryRunId = null;
+            _telemetryRunStartedTimestamp = 0L;
+            _telemetryViewStartedTimestamp = 0L;
+            _phaseStartedTimestamp = 0L;
+        }
+
         private void SetPhase(PhotoLabPhase phase)
         {
+            RecordCurrentTelemetryPhase();
             _phase = phase;
             _phaseStartedUtc = DateTime.UtcNow;
             _phaseStartedFrame = Game.FrameCount;
+            _phaseStartedTimestamp =
+                SurveillancePhotoLabTelemetry.GetTimestamp();
+            _telemetryPhasePlanIndex = _plan == null ? -1 : _planIndex;
+            _telemetryPhaseViewIndex = _plan == null ? -1 : _viewIndex;
+            _telemetryPhaseManifest = _plan == null
+                ? null
+                : Path.GetFileName(_plan.ManifestPath);
+            _telemetryPhaseOutput =
+                _plan != null &&
+                _viewIndex >= 0 &&
+                _viewIndex < _plan.Views.Count
+                    ? Path.GetFileName(_plan.Views[_viewIndex].OutputPath)
+                    : null;
         }
 
         private TimeSpan PhaseElapsed()
@@ -2496,6 +3199,7 @@ namespace FlockSurveillance
             _encoderCreatedNewFile = false;
             _encoderOutputPath = null;
             _encoderError = null;
+            _encoderTiming = null;
             _showNextCaptureLoadingPrompt = false;
             _loadingPromptOwned = false;
             _cancelKeyboardWasDown = false;
@@ -2505,6 +3209,15 @@ namespace FlockSurveillance
             _terminalError = null;
             _terminalCanceled = false;
             _returnCollisionReadyFrame = -1;
+            _telemetryPhasePlanIndex = -1;
+            _telemetryPhaseViewIndex = -1;
+            _telemetryPhaseManifest = null;
+            _telemetryPhaseOutput = null;
+            _telemetrySceneOpen = false;
+            _telemetrySceneStartedTimestamp = 0L;
+            _telemetryViewStartedTimestamp = 0L;
+            _telemetryDroppedAtRunStart = 0;
+            _phaseStartedTimestamp = 0L;
         }
 
         private static Vector3 ToVector(SceneVector3Dto value)
