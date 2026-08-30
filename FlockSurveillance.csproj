@@ -19,4 +19,16 @@
         Version="2.2.0"
     />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="flock_logo_transparent.png" />
+    <None Remove="GTALPR_Logo_Transparent.png" />
+
+    <EmbeddedResource Include="flock_logo_transparent.png">
+      <LogicalName>FlockSurveillance.Assets.flock_logo_transparent.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="GTALPR_Logo_Transparent.png">
+      <LogicalName>FlockSurveillance.Assets.GTALPR_Logo_Transparent.png</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
 </Project>

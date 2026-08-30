@@ -35,6 +35,9 @@ namespace FlockSurveillance
         private readonly ConcurrentQueue<CaptureResult> _results =
             new ConcurrentQueue<CaptureResult>();
 
+        private readonly SurveillancePhotoOverlayRenderer
+            _overlayRenderer = new SurveillancePhotoOverlayRenderer();
+
         private readonly Thread _worker;
 
         private int _captureInFlight;
@@ -63,6 +66,11 @@ namespace FlockSurveillance
                 return false;
             }
 
+            if (!_overlayRenderer.TryValidate(out error))
+            {
+                return false;
+            }
+
             ClientCaptureBounds ignored;
             return TryGetGameClientBounds(out ignored, out error);
         }
@@ -75,6 +83,7 @@ namespace FlockSurveillance
             string outputPath,
             int outputWidth,
             int outputHeight,
+            SurveillancePhotoOverlayMetadata overlayMetadata,
             out long captureId,
             out string error
         )
@@ -103,6 +112,17 @@ namespace FlockSurveillance
             if (string.IsNullOrWhiteSpace(outputPath))
             {
                 error = "A JPEG output path is required.";
+                return false;
+            }
+
+            if (overlayMetadata == null)
+            {
+                error = "Saved-photo overlay metadata is required.";
+                return false;
+            }
+
+            if (!_overlayRenderer.TryValidate(out error))
+            {
                 return false;
             }
 
@@ -167,7 +187,8 @@ namespace FlockSurveillance
                     Path.GetFullPath(outputPath),
                     outputWidth,
                     outputHeight,
-                    JpegQuality
+                    JpegQuality,
+                    overlayMetadata
                 );
 
                 if (!_jobs.TryAdd(job))
@@ -284,7 +305,7 @@ namespace FlockSurveillance
             }
         }
 
-        private static bool WriteJpeg(CaptureJob job)
+        private bool WriteJpeg(CaptureJob job)
         {
             string directory = Path.GetDirectoryName(job.OutputPath);
 
@@ -313,6 +334,11 @@ namespace FlockSurveillance
                     )
                 )
                 {
+                    _overlayRenderer.Apply(
+                        output,
+                        job.OverlayMetadata
+                    );
+
                     ImageCodecInfo codec = FindJpegCodec();
 
                     if (codec == null)
@@ -829,7 +855,8 @@ namespace FlockSurveillance
                 string outputPath,
                 int outputWidth,
                 int outputHeight,
-                long quality
+                long quality,
+                SurveillancePhotoOverlayMetadata overlayMetadata
             )
             {
                 CaptureId = captureId;
@@ -838,6 +865,7 @@ namespace FlockSurveillance
                 OutputWidth = outputWidth;
                 OutputHeight = outputHeight;
                 Quality = quality;
+                OverlayMetadata = overlayMetadata;
             }
 
             public long CaptureId { get; }
@@ -846,6 +874,10 @@ namespace FlockSurveillance
             public int OutputWidth { get; }
             public int OutputHeight { get; }
             public long Quality { get; }
+            public SurveillancePhotoOverlayMetadata OverlayMetadata
+            {
+                get;
+            }
         }
 
         private sealed class CaptureResult

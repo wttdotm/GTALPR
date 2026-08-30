@@ -6,6 +6,7 @@ using GTA;
 using GTA.Math;
 using GTA.Native;
 using GTA.UI;
+using WinFormsKeys = System.Windows.Forms.Keys;
 
 namespace FlockSurveillance
 {
@@ -25,13 +26,13 @@ namespace FlockSurveillance
         private const float RenderEyeForwardOffsetMeters = 0.4572f;
         private const float ZoomReferenceDistanceMeters = 15f;
         private const float MinimumZoomFieldOfViewDegrees = 10f;
-        private const int CaptureOverlayGradientSteps = 10;
-        private const float CaptureOverlayGradientPixels = 28f;
-        private const int CaptureOverlayRed = 0x0A;
-        private const int CaptureOverlayGreen = 0xBE;
-        private const int CaptureOverlayBlue = 0x51;
+        private const float DefaultCctvEffectStrength = 0.65f;
+        private const float MinimumCctvEffectStrength = 0.5f;
+        private const float MaximumCctvEffectStrength = 2f;
 
         private static readonly TimeSpan FadeTimeout =
+            TimeSpan.FromSeconds(4);
+        private static readonly TimeSpan CancelInstructionDuration =
             TimeSpan.FromSeconds(4);
         private static readonly TimeSpan StreamingTimeout =
             TimeSpan.FromSeconds(15);
@@ -91,6 +92,10 @@ namespace FlockSurveillance
         private string _encoderError;
         private bool _showNextCaptureLoadingPrompt;
         private bool _loadingPromptOwned;
+        private bool _cancelKeyboardWasDown;
+        private bool _cctvEffectEnabled = true;
+        private float _cctvEffectStrength =
+            DefaultCctvEffectStrength;
         private string _terminalError;
         private bool _terminalCanceled;
         private int _returnCollisionReadyFrame = -1;
@@ -145,12 +150,202 @@ namespace FlockSurveillance
         public string LastQualityWarning { get; private set; }
 
         /// <summary>
+        /// Controls the CCTV treatment applied while saving Photo Lab JPGs.
+        /// This is intentionally public for a future menu toggle.
+        /// </summary>
+        public bool CctvEffectEnabled
+        {
+            get { return _cctvEffectEnabled; }
+            set { _cctvEffectEnabled = value; }
+        }
+
+        public float CctvEffectStrength
+        {
+            get { return _cctvEffectStrength; }
+            set
+            {
+                float requestedStrength = value;
+
+                if (
+                    float.IsNaN(requestedStrength) ||
+                    float.IsInfinity(requestedStrength)
+                )
+                {
+                    requestedStrength =
+                        DefaultCctvEffectStrength;
+                }
+
+                _cctvEffectStrength = Math.Max(
+                    MinimumCctvEffectStrength,
+                    Math.Min(
+                        MaximumCctvEffectStrength,
+                        requestedStrength
+                    )
+                );
+            }
+        }
+
+        public bool TryGetLibraryMetrics(
+            out int generatedPhotoCount,
+            out int pendingPhotoCount,
+            out long captureFolderBytes,
+            out string error
+        )
+        {
+            generatedPhotoCount = 0;
+            pendingPhotoCount = 0;
+            captureFolderBytes = 0L;
+            error = null;
+
+            try
+            {
+                HashSet<string> countedFiles =
+                    new HashSet<string>(
+                        StringComparer.OrdinalIgnoreCase
+                    );
+
+                AccumulateDirectoryMetrics(
+                    _photoDirectory,
+                    true,
+                    countedFiles,
+                    ref generatedPhotoCount,
+                    ref captureFolderBytes
+                );
+
+                AccumulateDirectoryMetrics(
+                    _sceneDirectory,
+                    false,
+                    countedFiles,
+                    ref generatedPhotoCount,
+                    ref captureFolderBytes
+                );
+
+                if (!Directory.Exists(_sceneDirectory))
+                {
+                    return true;
+                }
+
+                SurveillancePhotoBatchPlan batch;
+                string discoveryError;
+
+                SurveillancePhotoBatchPlan.TryDiscover(
+                    _sceneDirectory,
+                    _photoDirectory,
+                    out batch,
+                    out discoveryError
+                );
+
+                if (batch != null)
+                {
+                    foreach (
+                        SurveillancePhotoScenePlan scene
+                        in batch.Scenes
+                    )
+                    {
+                        pendingPhotoCount +=
+                            scene.Views.Count;
+                    }
+
+                    return true;
+                }
+
+                bool hasManifest = false;
+
+                foreach (
+                    string ignored
+                    in Directory.EnumerateFiles(
+                        _sceneDirectory,
+                        "*.json",
+                        SearchOption.AllDirectories
+                    )
+                )
+                {
+                    hasManifest = true;
+                    break;
+                }
+
+                if (!hasManifest)
+                {
+                    return true;
+                }
+
+                error = discoveryError ??
+                    "The photo render queue could not be measured.";
+
+                return false;
+            }
+            catch (Exception exception)
+            {
+                error =
+                    "Could not measure Photo Lab storage: " +
+                    exception.Message;
+
+                return false;
+            }
+        }
+
+        private static void AccumulateDirectoryMetrics(
+            string directory,
+            bool countJpegs,
+            HashSet<string> countedFiles,
+            ref int generatedPhotoCount,
+            ref long captureFolderBytes
+        )
+        {
+            if (!Directory.Exists(directory))
+            {
+                return;
+            }
+
+            foreach (
+                string path
+                in Directory.EnumerateFiles(
+                    directory,
+                    "*",
+                    SearchOption.AllDirectories
+                )
+            )
+            {
+                FileInfo file = new FileInfo(path);
+
+                if (!countedFiles.Add(file.FullName))
+                {
+                    continue;
+                }
+
+                captureFolderBytes += file.Length;
+
+                if (
+                    countJpegs &&
+                    string.Equals(
+                        file.Extension,
+                        ".jpg",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                {
+                    generatedPhotoCount++;
+                }
+            }
+        }
+
+        /// <summary>
         /// JPGs confirmed by the writer before this run ended. A capture that
         /// was still in flight during cancellation may finish afterward.
         /// </summary>
         public int PhotosGeneratedThisRun => _photosGeneratedThisRun;
 
         public int PhotosQueuedThisRun => _photosQueuedThisRun;
+
+        public event Action PhotoGenerated;
+
+        public int PhotosWaitingInQueue =>
+            Math.Max(
+                0,
+                _photosQueuedThisRun -
+                _photosGeneratedThisRun -
+                _viewsCompletedElsewhereThisRun
+            );
 
         public int ScenesQueuedThisRun => _scenesQueuedThisRun;
 
@@ -257,12 +452,45 @@ namespace FlockSurveillance
 
             try
             {
-                ApplyModalFrameSuppression();
+                ApplyModalFrameSuppression(
+                    _phase != PhotoLabPhase.ShowingCancelInstructions
+                );
+                CaptureCancelShortcut();
                 PollPendingCaptureResult();
 
                 if (_cancelRequested && !IsCleaningUp())
                 {
-                    BeginCleanup(null, true);
+                    if (_phase ==
+                        PhotoLabPhase.ShowingCancelInstructions)
+                    {
+                        CompleteRun(null, true);
+                        return false;
+                    }
+                    else if (
+                        _pendingCaptureId != 0L &&
+                        !_encoderResultReceived
+                    )
+                    {
+                        _showNextCaptureLoadingPrompt = false;
+                        StopOwnedLoadingPrompt();
+                        Status =
+                            "Photo Lab is finishing the current JPG " +
+                            "before canceling.";
+
+                        if (PhaseElapsed() >= EncoderTimeout)
+                        {
+                            BeginCleanup(
+                                "Timed out waiting for the JPEG writer.",
+                                false
+                            );
+                        }
+
+                        return true;
+                    }
+                    else
+                    {
+                        BeginCleanup(null, true);
+                    }
                 }
 
                 if (!IsCleaningUp())
@@ -277,6 +505,10 @@ namespace FlockSurveillance
 
                 switch (_phase)
                 {
+                    case PhotoLabPhase.ShowingCancelInstructions:
+                        TickShowingCancelInstructions();
+                        break;
+
                     case PhotoLabPhase.FadingOutForSetup:
                         TickFadingOutForSetup();
                         break;
@@ -330,9 +562,10 @@ namespace FlockSurveillance
                         break;
                 }
 
-                if (ShouldDrawCaptureOverlay())
+                if (_phase ==
+                    PhotoLabPhase.ShowingCancelInstructions)
                 {
-                    DrawCaptureOverlay();
+                    DrawCancelInstructions();
                 }
 
                 if (_showNextCaptureLoadingPrompt &&
@@ -495,6 +728,9 @@ namespace FlockSurveillance
                 _encoderOutputPath = null;
                 _encoderError = null;
                 _showNextCaptureLoadingPrompt = false;
+                _cancelKeyboardWasDown =
+                    Game.IsKeyPressed(WinFormsKeys.Escape) ||
+                    Game.IsKeyPressed(WinFormsKeys.B);
                 StopOwnedLoadingPrompt();
                 _terminalError = null;
                 _terminalCanceled = false;
@@ -504,14 +740,18 @@ namespace FlockSurveillance
                 LastQualityWarning = null;
                 Status = string.Format(
                     CultureInfo.InvariantCulture,
-                    "Photo Lab queued {0} JPG(s) from {1} scene(s) and " +
-                    "is fading out for reconstruction.",
+                    "Photo Lab queued {0} JPG(s) from {1} scene(s). " +
+                    "Press Esc or B to save progress and cancel.",
                     _photosQueuedThisRun,
                     _plans.Count
                 );
 
-                Screen.FadeOut(FadeMilliseconds);
-                SetPhase(PhotoLabPhase.FadingOutForSetup);
+                ShowNotification(
+                    "~y~Photo Lab controls~s~~n~Press ~b~ESC~s~ or " +
+                    "~b~B~s~ to save progress and cancel.~n~Next " +
+                    "render will pick up from where it left off."
+                );
+                SetPhase(PhotoLabPhase.ShowingCancelInstructions);
                 return true;
             }
             catch (Exception exception)
@@ -525,7 +765,10 @@ namespace FlockSurveillance
             }
         }
 
-        private bool CanStart(out string error)
+        private bool CanStart(
+            out string error,
+            bool allowCurrentRun = false
+        )
         {
             error = null;
 
@@ -535,7 +778,7 @@ namespace FlockSurveillance
                 return false;
             }
 
-            if (IsBusy)
+            if (IsBusy && !allowCurrentRun)
             {
                 error = "The Photo Lab is already running.";
                 return false;
@@ -729,6 +972,63 @@ namespace FlockSurveillance
                 error =
                     "Another script took control of GTA's streaming focus.";
                 return false;
+            }
+
+            return true;
+        }
+
+        private void TickShowingCancelInstructions()
+        {
+            if (PhaseElapsed() < CancelInstructionDuration)
+            {
+                return;
+            }
+
+            string error;
+
+            if (!CanStart(out error, true) ||
+                !ValidateQueuedSceneDistance(out error))
+            {
+                CompleteRun(
+                    "Photo Lab could not begin reconstruction: " + error,
+                    false
+                );
+                return;
+            }
+
+            // Refresh the snapshot after the instruction pause so gameplay
+            // returns to the state immediately before reconstruction began.
+            _savedState = PhotoLabSavedState.Capture();
+            Screen.FadeOut(FadeMilliseconds);
+            Status = "Photo Lab is fading out for reconstruction.";
+            SetPhase(PhotoLabPhase.FadingOutForSetup);
+        }
+
+        private bool ValidateQueuedSceneDistance(out string error)
+        {
+            error = null;
+
+            if (_plans == null)
+            {
+                error = "The queued Photo Lab scenes are unavailable.";
+                return false;
+            }
+
+            Vector3 livePosition = GetCurrentLiveAnchor().Position;
+
+            foreach (SurveillancePhotoScenePlan scene in _plans)
+            {
+                if (livePosition.DistanceTo(scene.Center) <
+                    scene.MinimumLiveDistance)
+                {
+                    error = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Move at least {0:0} meters away from the " +
+                        "recorded scenes and try again.",
+                        scene.MinimumLiveDistance
+                    );
+                    return false;
+                }
             }
 
             return true;
@@ -1058,10 +1358,26 @@ namespace FlockSurveillance
                 return;
             }
 
+            SurveillancePhotoOverlayMetadata overlayMetadata;
+
+            if (!SurveillancePhotoOverlayMetadata.TryCreate(
+                _plan.Scene,
+                viewPlan.View,
+                _cctvEffectEnabled,
+                _cctvEffectStrength,
+                out overlayMetadata,
+                out error
+            ))
+            {
+                BeginCleanup(error, false);
+                return;
+            }
+
             if (!_jpegCapture.TryBeginCapture(
                 viewPlan.OutputPath,
                 viewPlan.View.OutputWidth,
                 viewPlan.View.OutputHeight,
+                overlayMetadata,
                 out _pendingCaptureId,
                 out error
             ))
@@ -1257,6 +1573,7 @@ namespace FlockSurveillance
             {
                 LastPhotoPath = _encoderOutputPath;
                 _photosGeneratedThisRun++;
+                PhotoGenerated?.Invoke();
             }
             else
             {
@@ -1848,16 +2165,21 @@ namespace FlockSurveillance
             }
         }
 
-        private static void ApplyModalFrameSuppression()
+        private static void ApplyModalFrameSuppression(bool hideUi)
         {
             Game.DisableAllControlsThisFrame();
             Game.Player.DisableFiringThisFrame();
             Function.Call(Hash.DISABLE_ALL_CONTROL_ACTIONS, 0);
             Function.Call(Hash.DISABLE_ALL_CONTROL_ACTIONS, 1);
             Function.Call(Hash.DISABLE_ALL_CONTROL_ACTIONS, 2);
-            Function.Call(Hash.HIDE_HUD_AND_RADAR_THIS_FRAME);
-            Function.Call(Hash.THEFEED_HIDE_THIS_FRAME);
-            Function.Call(Hash.HIDE_HELP_TEXT_THIS_FRAME);
+
+            if (hideUi)
+            {
+                Function.Call(Hash.HIDE_HUD_AND_RADAR_THIS_FRAME);
+                Function.Call(Hash.THEFEED_HIDE_THIS_FRAME);
+                Function.Call(Hash.HIDE_HELP_TEXT_THIS_FRAME);
+            }
+
             Function.Call(
                 Hash.SET_VEHICLE_DENSITY_MULTIPLIER_THIS_FRAME,
                 0f
@@ -1881,158 +2203,50 @@ namespace FlockSurveillance
             );
         }
 
-        private bool ShouldDrawCaptureOverlay()
+        private void CaptureCancelShortcut()
         {
-            if (IsCleaningUp() ||
-                _plan == null ||
-                _viewIndex < 0 ||
-                _viewIndex >= _plan.Views.Count)
-            {
-                return false;
-            }
-
-            return _phase == PhotoLabPhase.FadingInView ||
-                _phase == PhotoLabPhase.SettlingVisibleView ||
-                (_phase == PhotoLabPhase.EncodingAndFadingOut &&
-                    !Screen.IsFadedOut);
-        }
-
-        private void DrawCaptureOverlay()
-        {
-            SceneCameraViewDto view =
-                _plan.Views[_viewIndex].View;
-
-            if (view.OutputWidth <= 0 || view.OutputHeight <= 0)
+            if (_cancelRequested || IsCleaningUp())
             {
                 return;
             }
 
-            int sourceWidth = Screen.Resolution.Width;
-            int sourceHeight = Screen.Resolution.Height;
-            float sourceAspect = sourceWidth > 0 && sourceHeight > 0
-                ? (float)sourceWidth / sourceHeight
-                : Screen.AspectRatio;
-            float outputAspect = (float)view.OutputWidth /
-                view.OutputHeight;
+            bool keyboardDown =
+                Game.IsKeyPressed(WinFormsKeys.Escape) ||
+                Game.IsKeyPressed(WinFormsKeys.B);
+            bool keyboardCancel =
+                keyboardDown && !_cancelKeyboardWasDown;
+            _cancelKeyboardWasDown = keyboardDown;
+            bool controllerCancel = Function.Call<bool>(
+                Hash.IS_DISABLED_CONTROL_JUST_PRESSED,
+                0,
+                (int)GTA.Control.FrontendCancel
+            );
 
-            if (!IsFinite(sourceAspect) || sourceAspect <= 0f)
+            if (keyboardCancel || controllerCancel)
             {
-                sourceAspect = 16f / 9f;
+                RequestCancel();
             }
+        }
 
-            float left = 0f;
-            float top = 0f;
-            float right = 1f;
-            float bottom = 1f;
-
-            if (sourceAspect > outputAspect)
-            {
-                float visibleWidth = outputAspect / sourceAspect;
-                left = (1f - visibleWidth) * 0.5f;
-                right = 1f - left;
-            }
-            else if (sourceAspect < outputAspect)
-            {
-                float visibleHeight = sourceAspect / outputAspect;
-                top = (1f - visibleHeight) * 0.5f;
-                bottom = 1f - top;
-            }
-
-            float viewportWidth = right - left;
-            float viewportHeight = bottom - top;
-            float bandWidth = viewportWidth *
-                CaptureOverlayGradientPixels /
-                view.OutputWidth /
-                CaptureOverlayGradientSteps;
-            float bandHeight = viewportHeight *
-                CaptureOverlayGradientPixels /
-                view.OutputHeight /
-                CaptureOverlayGradientSteps;
-
-            Function.Call(Hash.SET_SCRIPT_GFX_DRAW_ORDER, 7);
+        private static void DrawCancelInstructions()
+        {
             Function.Call(
-                Hash.SET_SCRIPT_GFX_DRAW_BEHIND_PAUSEMENU,
+                Hash.DRAW_RECT,
+                0.5f,
+                0.80f,
+                0.86f,
+                0.13f,
+                0,
+                0,
+                0,
+                215,
                 false
             );
-
-            for (int index = 0;
-                index < CaptureOverlayGradientSteps;
-                index++)
-            {
-                float fade = 1f -
-                    ((float)index / CaptureOverlayGradientSteps);
-                int alpha = index == 0
-                    ? 255
-                    : (int)Math.Round(
-                        255d * Math.Pow(fade, 1.5d)
-                    );
-                float ringLeft = left + (index * bandWidth);
-                float ringRight = right - (index * bandWidth);
-                float ringTop = top + (index * bandHeight);
-                float ringBottom = bottom - (index * bandHeight);
-                float ringWidth = ringRight - ringLeft;
-                float ringHeight = ringBottom - ringTop;
-
-                if (ringWidth <= bandWidth ||
-                    ringHeight <= bandHeight)
-                {
-                    break;
-                }
-
-                DrawOverlayRectangle(
-                    (ringLeft + ringRight) * 0.5f,
-                    ringTop + (bandHeight * 0.5f),
-                    ringWidth,
-                    bandHeight,
-                    alpha
-                );
-                DrawOverlayRectangle(
-                    (ringLeft + ringRight) * 0.5f,
-                    ringBottom - (bandHeight * 0.5f),
-                    ringWidth,
-                    bandHeight,
-                    alpha
-                );
-
-                float sideHeight = ringHeight -
-                    (2f * bandHeight);
-
-                if (sideHeight > 0f)
-                {
-                    DrawOverlayRectangle(
-                        ringLeft + (bandWidth * 0.5f),
-                        (ringTop + ringBottom) * 0.5f,
-                        bandWidth,
-                        sideHeight,
-                        alpha
-                    );
-                    DrawOverlayRectangle(
-                        ringRight - (bandWidth * 0.5f),
-                        (ringTop + ringBottom) * 0.5f,
-                        bandWidth,
-                        sideHeight,
-                        alpha
-                    );
-                }
-            }
-
-            float labelX = right -
-                (viewportWidth * 34f / view.OutputWidth);
-            float labelY = bottom -
-                (viewportHeight * 60f / view.OutputHeight);
-
             Function.Call(Hash.SET_TEXT_FONT, 0);
-            Function.Call(Hash.SET_TEXT_SCALE, 0f, 0.42f);
-            Function.Call(
-                Hash.SET_TEXT_COLOUR,
-                CaptureOverlayRed,
-                CaptureOverlayGreen,
-                CaptureOverlayBlue,
-                255
-            );
-            Function.Call(Hash.SET_TEXT_CENTRE, false);
-            Function.Call(Hash.SET_TEXT_RIGHT_JUSTIFY, true);
-            Function.Call(Hash.SET_TEXT_WRAP, left, labelX);
+            Function.Call(Hash.SET_TEXT_SCALE, 0f, 0.48f);
+            Function.Call(Hash.SET_TEXT_COLOUR, 255, 255, 255, 255);
+            Function.Call(Hash.SET_TEXT_CENTRE, true);
+            Function.Call(Hash.SET_TEXT_WRAP, 0.08f, 0.92f);
             Function.Call(Hash.SET_TEXT_OUTLINE);
             Function.Call(
                 Hash.BEGIN_TEXT_COMMAND_DISPLAY_TEXT,
@@ -2040,36 +2254,14 @@ namespace FlockSurveillance
             );
             Function.Call(
                 Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME,
-                "GTALPR"
+                "~y~Press ESC or B to save progress and cancel.~n~" +
+                "~s~Next render will pick up from where it left off."
             );
             Function.Call(
                 Hash.END_TEXT_COMMAND_DISPLAY_TEXT,
-                labelX,
-                labelY,
+                0.5f,
+                0.755f,
                 0
-            );
-            Function.Call(Hash.SET_TEXT_RIGHT_JUSTIFY, false);
-        }
-
-        private static void DrawOverlayRectangle(
-            float x,
-            float y,
-            float width,
-            float height,
-            int alpha
-        )
-        {
-            Function.Call(
-                Hash.DRAW_RECT,
-                x,
-                y,
-                width,
-                height,
-                CaptureOverlayRed,
-                CaptureOverlayGreen,
-                CaptureOverlayBlue,
-                alpha,
-                false
             );
         }
 
@@ -2306,6 +2498,7 @@ namespace FlockSurveillance
             _encoderError = null;
             _showNextCaptureLoadingPrompt = false;
             _loadingPromptOwned = false;
+            _cancelKeyboardWasDown = false;
             _reconstructionSkippedCount = 0;
             _reconstructionWarningCount = 0;
             _captureCriticalOmissionCount = 0;
@@ -2608,6 +2801,7 @@ namespace FlockSurveillance
         private enum PhotoLabPhase
         {
             Idle,
+            ShowingCancelInstructions,
             FadingOutForSetup,
             LoadingRemoteScene,
             SettlingRemoteFocus,
