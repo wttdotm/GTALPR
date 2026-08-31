@@ -17,8 +17,10 @@ namespace FlockSurveillance
     /// </summary>
     internal static class SurveillancePhotoLabManifestReader
     {
-        public const int ReaderVersion = 2;
+        public const int ReaderVersion = 4;
         internal const int CameraDestructionMinimumReaderVersion = 2;
+        internal const int ExplosiveDestructionMinimumReaderVersion = 3;
+        internal const int WeaponDestructionPoseMinimumReaderVersion = 4;
         private const long MaximumManifestBytes = 16L * 1024L * 1024L;
         private const int MaximumEntities = 4096;
         private const int MaximumViews = 64;
@@ -535,6 +537,92 @@ namespace FlockSurveillance
                 error =
                     "Camera " + cameraId +
                     " has incomplete destruction-capture metadata.";
+                return false;
+            }
+
+            if (
+                destruction.DestroyedByExplosiveWeapon &&
+                (
+                    minimumReaderVersion <
+                        ExplosiveDestructionMinimumReaderVersion ||
+                    !SurveillanceExplosiveWeapon.IsSupportedName(
+                        destruction.DestroyingExplosiveWeapon
+                    )
+                )
+            )
+            {
+                error =
+                    "Camera " + cameraId +
+                    " has invalid explosive-destruction metadata.";
+                return false;
+            }
+
+            if (
+                !destruction.DestroyedByExplosiveWeapon &&
+                !string.IsNullOrWhiteSpace(
+                    destruction.DestroyingExplosiveWeapon
+                )
+            )
+            {
+                error =
+                    "Camera " + cameraId +
+                    " has inconsistent explosive-destruction metadata.";
+                return false;
+            }
+
+            bool hasDestroyingWeaponIdentity =
+                destruction.DestroyingWeaponHash != 0 ||
+                !string.IsNullOrWhiteSpace(
+                    destruction.DestroyingWeaponName
+                );
+
+            if (
+                destruction.DestroyedByWeapon &&
+                (
+                    minimumReaderVersion <
+                        WeaponDestructionPoseMinimumReaderVersion ||
+                    (
+                        hasDestroyingWeaponIdentity &&
+                        !SurveillanceExplosiveWeapon.
+                            IsValidRecordedWeapon(
+                                destruction.DestroyingWeaponHash,
+                                destruction.DestroyingWeaponName
+                            )
+                    )
+                )
+            )
+            {
+                error =
+                    "Camera " + cameraId +
+                    " has invalid weapon-destruction metadata.";
+                return false;
+            }
+
+            if (
+                !destruction.DestroyedByWeapon &&
+                hasDestroyingWeaponIdentity
+            )
+            {
+                error =
+                    "Camera " + cameraId +
+                    " has inconsistent weapon-destruction metadata.";
+                return false;
+            }
+
+            if (
+                destruction.DestroyedByWeapon &&
+                destruction.DestroyedByExplosiveWeapon &&
+                hasDestroyingWeaponIdentity &&
+                !string.Equals(
+                    destruction.DestroyingWeaponName,
+                    destruction.DestroyingExplosiveWeapon,
+                    StringComparison.Ordinal
+                )
+            )
+            {
+                error =
+                    "Camera " + cameraId +
+                    " has conflicting destroying-weapon metadata.";
                 return false;
             }
 

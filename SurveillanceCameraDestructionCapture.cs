@@ -29,7 +29,10 @@ namespace FlockSurveillance
 
         public int IgnoredTooFarCount { get; private set; }
 
-        public bool Schedule(ActiveCamera camera)
+        public bool Schedule(
+            ActiveCamera camera,
+            SurveillanceCameraDestructionCause cause
+        )
         {
             if (
                 camera?.Definition == null ||
@@ -46,6 +49,8 @@ namespace FlockSurveillance
                 MaximumCaptureDelayFrames,
                 Math.Max(1, CaptureDelayFrames)
             );
+            cause = cause ??
+                SurveillanceCameraDestructionCause.NonWeapon();
 
             _pending.Add(
                 new PendingCameraDestruction
@@ -53,7 +58,14 @@ namespace FlockSurveillance
                     CameraId = camera.Definition.FlockCameraId,
                     Prop = camera.Prop,
                     DestroyedAtFrame = Game.FrameCount,
-                    RequestedDelayFrames = delayFrames
+                    RequestedDelayFrames = delayFrames,
+                    DestroyedByWeapon = cause.DestroyedByWeapon,
+                    DestroyingWeaponHash = cause.DestroyingWeaponHash,
+                    DestroyingWeaponName = cause.DestroyingWeaponName,
+                    DestroyedByExplosiveWeapon =
+                        cause.DestroyedByExplosiveWeapon,
+                    DestroyingExplosiveWeapon =
+                        cause.DestroyingExplosiveWeapon
                 }
             );
 
@@ -266,7 +278,14 @@ namespace FlockSurveillance
                 RenderEyeDistance = geometry.RenderEyeDistance,
                 SubjectKind = subject is Vehicle
                     ? "PlayerVehicle"
-                    : "PlayerPed"
+                    : "PlayerPed",
+                DestroyedByWeapon = pending.DestroyedByWeapon,
+                DestroyingWeaponHash = pending.DestroyingWeaponHash,
+                DestroyingWeaponName = pending.DestroyingWeaponName,
+                DestroyedByExplosiveWeapon =
+                    pending.DestroyedByExplosiveWeapon,
+                DestroyingExplosiveWeapon =
+                    pending.DestroyingExplosiveWeapon
             };
 
             LastError = null;
@@ -496,6 +515,11 @@ namespace FlockSurveillance
             public Prop Prop { get; set; }
             public int DestroyedAtFrame { get; set; }
             public int RequestedDelayFrames { get; set; }
+            public bool DestroyedByWeapon { get; set; }
+            public int DestroyingWeaponHash { get; set; }
+            public string DestroyingWeaponName { get; set; }
+            public bool DestroyedByExplosiveWeapon { get; set; }
+            public string DestroyingExplosiveWeapon { get; set; }
         }
     }
 
@@ -529,6 +553,11 @@ namespace FlockSurveillance
         public int ChosenCandidate { get; set; }
         public float SubjectDistance { get; set; }
         public float RenderEyeDistance { get; set; }
+        public bool DestroyedByWeapon { get; set; }
+        public int DestroyingWeaponHash { get; set; }
+        public string DestroyingWeaponName { get; set; }
+        public bool DestroyedByExplosiveWeapon { get; set; }
+        public string DestroyingExplosiveWeapon { get; set; }
     }
 
     internal sealed class DestructionCaptureLineOfSightScore

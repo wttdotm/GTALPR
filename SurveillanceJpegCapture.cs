@@ -627,11 +627,6 @@ namespace FlockSurveillance
 
             IntPtr window = foreground;
 
-            if (!TryVerifyDisplayMode(window, out error))
-            {
-                return false;
-            }
-
             if (IsIconic(window))
             {
                 error = "GTA's client window is minimized.";

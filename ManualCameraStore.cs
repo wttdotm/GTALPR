@@ -19,6 +19,8 @@ namespace FlockSurveillance
 
         // Compass heading on disk.
         public float Heading { get; set; }
+
+        public bool isDestroyed { get; set; }
     }
 
     internal sealed class ManualCameraStore
@@ -146,7 +148,7 @@ namespace FlockSurveillance
                                     record.Heading
                                 ),
 
-                            IsDestroyed = false
+                            IsDestroyed = record.isDestroyed
                         }
                     );
                 }
@@ -235,7 +237,9 @@ namespace FlockSurveillance
                             Heading =
                                 GtaHeadingToCompassHeading(
                                     definition.Heading
-                                )
+                                ),
+
+                            isDestroyed = definition.IsDestroyed
                         }
                     );
                 }

@@ -23,17 +23,19 @@ namespace FlockSurveillance
         private const int SpawnBudgetPerTick = 8;
         private const int BlackViewWarmupFrames = 18;
         private const int VisibleSettleFrames = 12;
+        private const int DestructionExplosionLeadFrames = 2;
+        private const int WeaponAimDurationMilliseconds = 10000;
         private const int ReturnSettleFrames = 6;
         private const float RenderEyeForwardOffsetMeters = 0.4572f;
         private const float ZoomReferenceDistanceMeters = 15f;
         private const float MinimumZoomFieldOfViewDegrees = 10f;
+        private const float MinimumWeaponAimDistanceMeters = 1f;
+        private const float MaximumWeaponAimHeadingDeltaDegrees = 60f;
         private const float DefaultCctvEffectStrength = 0.65f;
         private const float MinimumCctvEffectStrength = 0.5f;
         private const float MaximumCctvEffectStrength = 2f;
 
         private static readonly TimeSpan FadeTimeout =
-            TimeSpan.FromSeconds(4);
-        private static readonly TimeSpan CancelInstructionDuration =
             TimeSpan.FromSeconds(4);
         private static readonly TimeSpan StreamingTimeout =
             TimeSpan.FromSeconds(15);
@@ -60,7 +62,6 @@ namespace FlockSurveillance
         private DateTime _phaseStartedUtc;
         private int _phaseStartedFrame;
         private long _phaseStartedTimestamp;
-        private long _cancelInstructionsStartedTimestamp;
         private int _telemetryPhasePlanIndex = -1;
         private int _telemetryPhaseViewIndex = -1;
         private string _telemetryPhaseManifest;
@@ -112,6 +113,8 @@ namespace FlockSurveillance
         private bool _showNextCaptureLoadingPrompt;
         private bool _loadingPromptOwned;
         private bool _cancelKeyboardWasDown;
+        private int _destructionExplosionFrame = -1;
+        private Ped _weaponPosePed;
         private bool _cctvEffectEnabled = true;
         private float _cctvEffectStrength =
             DefaultCctvEffectStrength;
@@ -811,11 +814,6 @@ namespace FlockSurveillance
                         break;
                 }
 
-                if (ShouldDrawCancelInstructions())
-                {
-                    DrawCancelInstructions();
-                }
-
                 if (_showNextCaptureLoadingPrompt &&
                     Screen.IsFadedOut &&
                     !IsCleaningUp())
@@ -1010,13 +1008,6 @@ namespace FlockSurveillance
                     _plans.Count
                 );
 
-                ShowNotification(
-                    "~y~Photo Lab controls~s~~n~Press ~b~ESC~s~ or " +
-                    "~b~B~s~ to save progress and cancel.~n~Next " +
-                    "render will pick up from where it left off."
-                );
-                _cancelInstructionsStartedTimestamp =
-                    SurveillancePhotoLabTelemetry.GetTimestamp();
                 Screen.FadeOut(FadeMilliseconds);
                 Status = "Photo Lab is fading out for reconstruction.";
                 SetPhase(PhotoLabPhase.FadingOutForSetup);
@@ -1496,6 +1487,8 @@ namespace FlockSurveillance
             long operationStarted =
                 SurveillancePhotoLabTelemetry.GetTimestamp();
             ReleaseOwnedCamera();
+            ClearOwnedWeaponPose();
+            _destructionExplosionFrame = -1;
             ApplyRecordedWeather(_plan.Scene.World);
 
             SurveillancePhotoViewPlan viewPlan =
@@ -1570,6 +1563,19 @@ namespace FlockSurveillance
                 );
             }
 
+            bool weaponPoseApplied;
+            string weaponPoseError;
+
+            if (!TryApplyDestructionWeaponPose(
+                view,
+                focusAnchor,
+                out weaponPoseApplied,
+                out weaponPoseError
+            ))
+            {
+                throw new InvalidOperationException(weaponPoseError);
+            }
+
             SetRemoteEntityFocus(focusAnchor);
             StopOwnedLoadScene();
             RequestCollision(target);
@@ -1626,10 +1632,207 @@ namespace FlockSurveillance
                     recordedEye,
                     eye,
                     fieldOfView,
-                    requiredDestructionPropSpawned
+                    requiredDestructionPropSpawned,
+                    weaponPoseApplied
                 )
             );
             SetPhase(PhotoLabPhase.WarmingViewWhileBlack);
+        }
+
+        private bool TryApplyDestructionWeaponPose(
+            SceneCameraViewDto view,
+            Entity focusAnchor,
+            out bool poseApplied,
+            out string error
+        )
+        {
+            poseApplied = false;
+            error = null;
+
+            SceneCameraDestructionViewDto destruction =
+                view?.CameraDestruction;
+
+            if (
+                destruction == null ||
+                !destruction.DestroyedByWeapon ||
+                destruction.DestroyingWeaponHash == 0 ||
+                !string.IsNullOrWhiteSpace(view.TargetVehicleId)
+            )
+            {
+                return true;
+            }
+
+            Ped ped = focusAnchor as Ped;
+
+            if (ped == null || !ped.Exists())
+            {
+                error =
+                    "The reconstructed player ped is unavailable for " +
+                    "the recorded weapon pose.";
+                return false;
+            }
+
+            WeaponHash weaponHash =
+                (WeaponHash)destruction.DestroyingWeaponHash;
+
+            try
+            {
+                ped.Weapons.Give(weaponHash, 1, true, true);
+
+                if (!ped.Weapons.Select(weaponHash, true))
+                {
+                    error =
+                        "Photo Lab could not equip the weapon that " +
+                        "destroyed the camera.";
+                    return false;
+                }
+
+                if (!CanUseSyntheticAimPose(weaponHash))
+                {
+                    return true;
+                }
+
+                Vector3 aimTarget = ToVector(
+                    destruction.PhysicalCameraPosition
+                );
+                Vector3 toTarget = aimTarget - ped.Position;
+                toTarget.Z = 0f;
+                float distance = toTarget.Length();
+
+                if (
+                    !IsFinite(distance) ||
+                    distance < MinimumWeaponAimDistanceMeters
+                )
+                {
+                    return true;
+                }
+
+                float targetHeading = NormalizeHeading(
+                    (float)(
+                        Math.Atan2(-toTarget.X, toTarget.Y) *
+                        180d / Math.PI
+                    )
+                );
+                float headingDelta = Math.Abs(
+                    ShortestHeadingDelta(
+                        NormalizeHeading(ped.Heading),
+                        targetHeading
+                    )
+                );
+
+                if (
+                    headingDelta >
+                        MaximumWeaponAimHeadingDeltaDegrees
+                )
+                {
+                    return true;
+                }
+
+                ped.Task.AimAt(
+                    aimTarget,
+                    WeaponAimDurationMilliseconds
+                );
+                _weaponPosePed = ped;
+                poseApplied = true;
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error =
+                    "Photo Lab could not recreate the recorded weapon " +
+                    "pose: " + exception.Message;
+                return false;
+            }
+        }
+
+        private static bool CanUseSyntheticAimPose(
+            WeaponHash weaponHash
+        )
+        {
+            uint groupHash = Function.Call<uint>(
+                Hash.GET_WEAPONTYPE_GROUP,
+                unchecked((uint)weaponHash)
+            );
+
+            return groupHash == unchecked((uint)Game.GenerateHash(
+                       "GROUP_PISTOL"
+                   )) ||
+                groupHash == unchecked((uint)Game.GenerateHash(
+                    "GROUP_SMG"
+                )) ||
+                groupHash == unchecked((uint)Game.GenerateHash(
+                    "GROUP_RIFLE"
+                )) ||
+                groupHash == unchecked((uint)Game.GenerateHash(
+                    "GROUP_MG"
+                )) ||
+                groupHash == unchecked((uint)Game.GenerateHash(
+                    "GROUP_SHOTGUN"
+                )) ||
+                groupHash == unchecked((uint)Game.GenerateHash(
+                    "GROUP_SNIPER"
+                )) ||
+                groupHash == unchecked((uint)Game.GenerateHash(
+                    "GROUP_HEAVY"
+                )) ||
+                groupHash == unchecked((uint)Game.GenerateHash(
+                    "GROUP_STUNGUN"
+                ));
+        }
+
+        private static float NormalizeHeading(float heading)
+        {
+            heading %= 360f;
+
+            if (heading < 0f)
+            {
+                heading += 360f;
+            }
+
+            return heading;
+        }
+
+        private static float ShortestHeadingDelta(
+            float from,
+            float to
+        )
+        {
+            float delta = NormalizeHeading(to) -
+                NormalizeHeading(from);
+
+            if (delta > 180f)
+            {
+                delta -= 360f;
+            }
+            else if (delta < -180f)
+            {
+                delta += 360f;
+            }
+
+            return delta;
+        }
+
+        private void ClearOwnedWeaponPose()
+        {
+            Ped ped = _weaponPosePed;
+            _weaponPosePed = null;
+
+            if (ped == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (ped.Exists())
+                {
+                    ped.Task.ClearAllImmediately();
+                }
+            }
+            catch
+            {
+                // The reconstructed ped may already have been deleted.
+            }
         }
 
         private void TickWarmingViewWhileBlack()
@@ -1646,9 +1849,6 @@ namespace FlockSurveillance
 
             _showNextCaptureLoadingPrompt = false;
             StopOwnedLoadingPrompt();
-            // Never let the startup instructions survive into a visible
-            // camera frame, where the screen grab could capture them.
-            _cancelInstructionsStartedTimestamp = 0L;
             PlayCaptureShutterSound();
             Screen.FadeIn(FadeMilliseconds);
             Status = "Photo Lab is revealing the reconstructed view.";
@@ -1710,6 +1910,39 @@ namespace FlockSurveillance
                     "skipping it.";
                 SetPhase(PhotoLabPhase.EncodingAndFadingOut);
                 return;
+            }
+
+            SceneCameraDestructionViewDto destruction =
+                viewPlan.View.CameraDestruction;
+
+            if (
+                destruction != null &&
+                destruction.DestroyedByExplosiveWeapon
+            )
+            {
+                if (_destructionExplosionFrame < 0)
+                {
+                    if (!TryReplayDestructionExplosion(
+                        destruction,
+                        out error
+                    ))
+                    {
+                        BeginCleanup(error, false);
+                        return;
+                    }
+
+                    _destructionExplosionFrame = Game.FrameCount;
+                    Status =
+                        "Photo Lab is replaying the recorded explosion.";
+                    return;
+                }
+
+                if (unchecked(
+                    Game.FrameCount - _destructionExplosionFrame
+                ) < DestructionExplosionLeadFrames)
+                {
+                    return;
+                }
             }
 
             SurveillancePhotoOverlayMetadata overlayMetadata;
@@ -1791,6 +2024,78 @@ namespace FlockSurveillance
             SetPhase(PhotoLabPhase.EncodingAndFadingOut);
         }
 
+        private bool TryReplayDestructionExplosion(
+            SceneCameraDestructionViewDto destruction,
+            out string error
+        )
+        {
+            error = null;
+
+            if (
+                destruction == null ||
+                !destruction.DestroyedByExplosiveWeapon ||
+                !SurveillanceExplosiveWeapon.IsSupportedName(
+                    destruction.DestroyingExplosiveWeapon
+                )
+            )
+            {
+                error =
+                    "The destruction scene has invalid explosion " +
+                    "replay metadata.";
+                return false;
+            }
+
+            Vector3 position = ToVector(
+                destruction.PhysicalCameraPosition
+            );
+            ExplosionType explosionType =
+                SurveillanceExplosiveWeapon.GetReplayExplosionType(
+                    destruction.DestroyingExplosiveWeapon
+                );
+
+            try
+            {
+                // The final true is the native noDamage flag, so the normal
+                // visual effect cannot disturb the frozen reconstructed
+                // scene.
+                Function.Call(
+                    Hash.ADD_EXPLOSION,
+                    position.X,
+                    position.Y,
+                    position.Z,
+                    (int)explosionType,
+                    1f,
+                    false,
+                    false,
+                    0f,
+                    true
+                );
+
+                Dictionary<string, object> values =
+                    BuildTelemetryContext();
+                values["destroying_explosive_weapon"] =
+                    destruction.DestroyingExplosiveWeapon;
+                values["replay_explosion_type"] =
+                    explosionType.ToString();
+                values["replay_x"] = position.X;
+                values["replay_y"] = position.Y;
+                values["replay_z"] = position.Z;
+                _telemetry.Record(
+                    "destruction_explosion_replayed",
+                    _telemetryRunId,
+                    values
+                );
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error =
+                    "Photo Lab could not replay the recorded explosion: " +
+                    exception.Message;
+                return false;
+            }
+        }
+
         private void TickEncodingAndFadingOut()
         {
             PollPendingCaptureResult();
@@ -1859,6 +2164,7 @@ namespace FlockSurveillance
             // This method is only entered after both the JPEG result and a
             // fully black screen are confirmed.
             ReleaseOwnedCamera();
+            ClearOwnedWeaponPose();
             ClearOwnedFocus();
 
             if (_reconstructor != null)
@@ -2094,6 +2400,7 @@ namespace FlockSurveillance
             }
 
             ReleaseOwnedCamera();
+            ClearOwnedWeaponPose();
 
             ClearOwnedFocus();
 
@@ -2390,6 +2697,7 @@ namespace FlockSurveillance
             try
             {
                 ReleaseOwnedCamera();
+                ClearOwnedWeaponPose();
             }
             catch
             {
@@ -2712,66 +3020,6 @@ namespace FlockSurveillance
             {
                 RequestCancel();
             }
-        }
-
-        private static void DrawCancelInstructions()
-        {
-            Function.Call(
-                Hash.DRAW_RECT,
-                0.5f,
-                0.80f,
-                0.86f,
-                0.13f,
-                0,
-                0,
-                0,
-                215,
-                false
-            );
-            Function.Call(Hash.SET_TEXT_FONT, 0);
-            Function.Call(Hash.SET_TEXT_SCALE, 0f, 0.48f);
-            Function.Call(Hash.SET_TEXT_COLOUR, 255, 255, 255, 255);
-            Function.Call(Hash.SET_TEXT_CENTRE, true);
-            Function.Call(Hash.SET_TEXT_WRAP, 0.08f, 0.92f);
-            Function.Call(Hash.SET_TEXT_OUTLINE);
-            Function.Call(
-                Hash.BEGIN_TEXT_COMMAND_DISPLAY_TEXT,
-                "STRING"
-            );
-            Function.Call(
-                Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME,
-                "~y~Press ESC or B to save progress and cancel.~n~" +
-                "~s~Next render will pick up from where it left off."
-            );
-            Function.Call(
-                Hash.END_TEXT_COMMAND_DISPLAY_TEXT,
-                0.5f,
-                0.755f,
-                0
-            );
-        }
-
-        private bool ShouldDrawCancelInstructions()
-        {
-            if (
-                _cancelInstructionsStartedTimestamp <= 0L ||
-                IsCleaningUp()
-            )
-            {
-                return false;
-            }
-
-            bool visible =
-                SurveillancePhotoLabTelemetry.ElapsedMilliseconds(
-                    _cancelInstructionsStartedTimestamp
-                ) < CancelInstructionDuration.TotalMilliseconds;
-
-            if (!visible)
-            {
-                _cancelInstructionsStartedTimestamp = 0L;
-            }
-
-            return visible;
         }
 
         private void ShowOwnedLoadingPrompt()
@@ -3232,6 +3480,26 @@ namespace FlockSurveillance
                 destruction.RequestedDelayFrames;
             values["destruction_actual_delay_frames"] =
                 destruction.ActualDelayFrames;
+            values["destroyed_by_weapon"] =
+                destruction.DestroyedByWeapon;
+
+            if (destruction.DestroyedByWeapon)
+            {
+                values["destroying_weapon_hash"] =
+                    destruction.DestroyingWeaponHash;
+                values["destroying_weapon_name"] =
+                    destruction.DestroyingWeaponName;
+            }
+
+            values["destroyed_by_explosive_weapon"] =
+                destruction.DestroyedByExplosiveWeapon;
+
+            if (destruction.DestroyedByExplosiveWeapon)
+            {
+                values["destroying_explosive_weapon"] =
+                    destruction.DestroyingExplosiveWeapon;
+            }
+
             values["destruction_subject_kind"] = destruction.SubjectKind;
             values["destruction_subject_distance"] =
                 destruction.SubjectDistance;
@@ -3277,7 +3545,8 @@ namespace FlockSurveillance
                 Vector3 recordedEye,
                 Vector3 renderEye,
                 float effectiveFieldOfView,
-                bool requiredDestructionPropSpawned
+                bool requiredDestructionPropSpawned,
+                bool weaponPoseApplied
             )
         {
             Dictionary<string, object> values =
@@ -3309,6 +3578,31 @@ namespace FlockSurveillance
                     view.CameraDestruction.DestroyedPropId;
                 values["required_prop_spawned"] =
                     requiredDestructionPropSpawned;
+                values["destroyed_by_weapon"] =
+                    view.CameraDestruction.DestroyedByWeapon;
+                values["weapon_pose_applied"] =
+                    weaponPoseApplied;
+
+                if (view.CameraDestruction.DestroyedByWeapon)
+                {
+                    values["destroying_weapon_hash"] =
+                        view.CameraDestruction.DestroyingWeaponHash;
+                    values["destroying_weapon_name"] =
+                        view.CameraDestruction.DestroyingWeaponName;
+                }
+
+                values["destroyed_by_explosive_weapon"] =
+                    view.CameraDestruction.DestroyedByExplosiveWeapon;
+
+                if (
+                    view.CameraDestruction.
+                        DestroyedByExplosiveWeapon
+                )
+                {
+                    values["destroying_explosive_weapon"] =
+                        view.CameraDestruction.
+                            DestroyingExplosiveWeapon;
+                }
             }
 
             return values;
@@ -3489,7 +3783,8 @@ namespace FlockSurveillance
             _showNextCaptureLoadingPrompt = false;
             _loadingPromptOwned = false;
             _cancelKeyboardWasDown = false;
-            _cancelInstructionsStartedTimestamp = 0L;
+            _destructionExplosionFrame = -1;
+            _weaponPosePed = null;
             _reconstructionSkippedCount = 0;
             _reconstructionWarningCount = 0;
             _captureCriticalOmissionCount = 0;
