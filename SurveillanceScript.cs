@@ -52,6 +52,9 @@ namespace FlockSurveillance
             new SurveillancePhotoLab();
 
         private const float CameraActivationDistanceMeters = 150f;
+        private const string StartRenderHelpText =
+            "Press B or Esc to cancel at anytime. Progress will " +
+            "continue where it left off.";
         private int _nextCameraStreamingCheck;
 
 
@@ -164,8 +167,15 @@ namespace FlockSurveillance
         private readonly NativeCheckboxItem _showFovDebugItem =
             new NativeCheckboxItem(
                 "Show FOV Debug Geometry",
-                "Shows camera FOV boundaries, centerlines, and sightlines.",
+                "Shows camera FOV boundaries and centerlines.",
                 false
+            );
+
+        private readonly NativeCheckboxItem _showLineOfSightItem =
+            new NativeCheckboxItem(
+                "Show Line of Sight",
+                "Shows a green line between a camera and the player when it has a clear sightline.",
+                true
             );
 
         private readonly NativeCheckboxItem _cameraNetworkItem =
@@ -375,7 +385,7 @@ namespace FlockSurveillance
         private readonly NativeItem _startRenderItem =
             new NativeItem(
                 "Start Render",
-                "Begin rendering the queued photos. Rendering can be canceled and resumed."
+                StartRenderHelpText
             )
             {
                 Enabled = false
@@ -446,6 +456,7 @@ namespace FlockSurveillance
             _controlPanelMenu.Add(_saveManualCamerasItem);
 
             _controlPanelMenu.Add(_showFovDebugItem);
+            _controlPanelMenu.Add(_showLineOfSightItem);
             _controlPanelMenu.Add(_cameraNetworkItem);
 
             _controlPanelPool.Add(_controlPanelMenu);
@@ -1468,6 +1479,61 @@ namespace FlockSurveillance
             );
         }
 
+        private void PersistCameraDestructionStates()
+        {
+            Dictionary<string, bool> destructionStates =
+                new Dictionary<string, bool>(
+                    StringComparer.Ordinal
+                );
+
+            foreach (
+                CameraDefinition definition
+                in _cameraDefinitions
+            )
+            {
+                if (
+                    definition != null &&
+                    !string.IsNullOrWhiteSpace(
+                        definition.FlockCameraId
+                    )
+                )
+                {
+                    destructionStates[
+                        definition.FlockCameraId
+                    ] = definition.IsDestroyed;
+                }
+            }
+
+            string error;
+
+            if (!CameraJsonDestructionStateStore.Save(
+                Path.Combine(
+                    "scripts",
+                    "in_game_cameras.json"
+                ),
+                destructionStates,
+                out error
+            ))
+            {
+                GTA.UI.Notification.Show(
+                    "~r~Camera destruction state could not be saved.~s~ " +
+                    error
+                );
+            }
+
+            if (!CameraJsonDestructionStateStore.Save(
+                _manualCameraStore.CameraPath,
+                destructionStates,
+                out error
+            ))
+            {
+                GTA.UI.Notification.Show(
+                    "~r~Manual camera destruction state could not be saved.~s~ " +
+                    error
+                );
+            }
+        }
+
         private bool CameraDefinitionIdExists(
             string cameraId
         )
@@ -1782,31 +1848,34 @@ namespace FlockSurveillance
                         camera.FovEndpoints,
                         displayColor
                     );
+                }
 
-                    if (vehicleInsideFov)
-                    {
-                        Vector3 cameraEyePosition =
-                            camera.Position +
-                            new Vector3(
-                                0f,
-                                0f,
-                                CameraEyeHeightMeters
-                            );
-
-                        Vector3 vehicleTargetPosition =
-                            playerVehicle.Position +
-                            new Vector3(
-                                0f,
-                                0f,
-                                0.5f
-                            );
-
-                        DrawLine(
-                            cameraEyePosition,
-                            vehicleTargetPosition,
-                            displayColor
+                if (
+                    _showLineOfSightItem.Checked &&
+                    hasLineOfSight
+                )
+                {
+                    Vector3 cameraEyePosition =
+                        camera.Position +
+                        new Vector3(
+                            0f,
+                            0f,
+                            CameraEyeHeightMeters
                         );
-                    }
+
+                    Vector3 vehicleTargetPosition =
+                        playerVehicle.Position +
+                        new Vector3(
+                            0f,
+                            0f,
+                            0.5f
+                        );
+
+                    DrawLine(
+                        cameraEyePosition,
+                        vehicleTargetPosition,
+                        Color.Lime
+                    );
                 }
 
                 if (!_cameraNetworkEnabled)
@@ -2120,81 +2189,95 @@ namespace FlockSurveillance
                     continue;
                 }
 
-                if (camera.Prop.HasBeenDamagedByAnyWeapon())
-                {
-                    camera.WeaponHitCount++;
-                    camera.Prop.ClearLastWeaponDamage();
-
-                    if (camera.WeaponHitCount >= 3)
-                    {
-                        DestroyCamera(camera);
-                        continue;
-                    }
-                }
-
                 bool validPlayerVehicle =
                     playerVehicle != null &&
                     playerVehicle.Exists() &&
                     playerVehicle.Speed > 3f;
 
-                if (!validPlayerVehicle)
+                if (validPlayerVehicle)
                 {
-                    continue;
-                }
+                    Vector3 offsetToCamera =
+                        camera.Prop.Position -
+                        playerVehicle.Position;
 
-                Vector3 offsetToCamera =
-                    camera.Prop.Position -
-                    playerVehicle.Position;
+                    offsetToCamera.Z = 0f;
 
-                offsetToCamera.Z = 0f;
+                    float distanceToCamera =
+                        offsetToCamera.Length();
 
-                float distanceToCamera =
-                    offsetToCamera.Length();
+                    if (distanceToCamera > 0.001f)
+                    {
+                        Vector3 directionToCamera =
+                            offsetToCamera /
+                            distanceToCamera;
 
-                if (distanceToCamera > 0.001f)
-                {
-                    Vector3 directionToCamera =
-                        offsetToCamera /
-                        distanceToCamera;
+                        Vector3 vehicleVelocity =
+                            playerVehicle.Velocity;
 
-                    Vector3 vehicleVelocity =
-                        playerVehicle.Velocity;
+                        float closingSpeed =
+                            (vehicleVelocity.X * directionToCamera.X) +
+                            (vehicleVelocity.Y * directionToCamera.Y);
 
-                    float closingSpeed =
-                        (vehicleVelocity.X * directionToCamera.X) +
-                        (vehicleVelocity.Y * directionToCamera.Y);
+                        float unfreezeDistance =
+                            2.5f +
+                            Math.Min(
+                                playerVehicle.Speed * 0.10f,
+                                4f
+                            );
 
-                    float unfreezeDistance =
-                        2.5f +
-                        Math.Min(
-                            playerVehicle.Speed * 0.10f,
-                            4f
+                        bool impactIsImminent =
+                            closingSpeed > 1f &&
+                            distanceToCamera <= unfreezeDistance;
+
+                        if (impactIsImminent)
+                        {
+                            camera.Prop.IsPositionFrozen = false;
+                        }
+                    }
+
+                    bool struckByPlayerVehicle =
+                        camera.Prop.IsTouching(
+                            playerVehicle
                         );
 
-                    bool impactIsImminent =
-                        closingSpeed > 1f &&
-                        distanceToCamera <= unfreezeDistance;
-
-                    if (impactIsImminent)
+                    if (struckByPlayerVehicle)
                     {
-                        camera.Prop.IsPositionFrozen = false;
+                        DestroyCamera(
+                            camera,
+                            SurveillanceCameraDestructionCause.NonWeapon()
+                        );
+                        continue;
                     }
                 }
 
-                bool struckByPlayerVehicle =
-                    camera.Prop.IsTouching(
-                        playerVehicle
-                    );
-
-                if (struckByPlayerVehicle)
+                if (camera.Prop.HasBeenDamagedByAnyWeapon())
                 {
-                    DestroyCamera(camera);
+                    WeaponHash destroyingWeapon;
+                    bool isExplosive;
+                    bool foundDestroyingWeapon =
+                        SurveillanceExplosiveWeapon.TryFindLatestDamage(
+                            camera.Prop,
+                            out destroyingWeapon,
+                            out isExplosive
+                        );
+                    SurveillanceCameraDestructionCause cause =
+                        SurveillanceCameraDestructionCause.Weapon(
+                            foundDestroyingWeapon
+                                ? (WeaponHash?)destroyingWeapon
+                                : null,
+                            foundDestroyingWeapon && isExplosive
+                        );
+
+                    camera.Prop.ClearLastWeaponDamage();
+                    DestroyCamera(camera, cause);
+                    continue;
                 }
             }
         }
 
         private void DestroyCamera(
-            ActiveCamera camera
+            ActiveCamera camera,
+            SurveillanceCameraDestructionCause cause
         )
         {
             if (
@@ -2209,6 +2292,7 @@ namespace FlockSurveillance
             camera.Definition.IsDestroyed = true;
             camera.WasReportableSighting = false;
             RefreshSaveManualCamerasItem();
+            PersistCameraDestructionStates();
 
             CameraDestructionEvent destructionEvent =
                 new CameraDestructionEvent
@@ -2300,7 +2384,11 @@ namespace FlockSurveillance
 
             if (_captureDestructionPhotosEnabled)
             {
-                _cameraDestructionCapture.Schedule(camera);
+                _cameraDestructionCapture.Schedule(
+                    camera,
+                    cause ??
+                        SurveillanceCameraDestructionCause.NonWeapon()
+                );
             }
 
             // TrySpawnBirdFlock(camera.Position);
@@ -3182,6 +3270,11 @@ namespace FlockSurveillance
             List<CameraDefinition> manualCamerasToSave =
                 new List<CameraDefinition>();
 
+            HashSet<CameraDefinition> unsavedDefinitions =
+                new HashSet<CameraDefinition>(
+                    _unsavedManualCameraDefinitions
+                );
+
             foreach (
                 CameraDefinition definition
                 in _manualCameraDefinitions
@@ -3189,7 +3282,10 @@ namespace FlockSurveillance
             {
                 if (
                     definition != null &&
-                    !definition.IsDestroyed
+                    (
+                        !definition.IsDestroyed ||
+                        !unsavedDefinitions.Contains(definition)
+                    )
                 )
                 {
                     manualCamerasToSave.Add(definition);
@@ -3213,7 +3309,10 @@ namespace FlockSurveillance
             _manualCameraDefinitions.RemoveAll(
                 definition =>
                     definition == null ||
-                    definition.IsDestroyed
+                    (
+                        definition.IsDestroyed &&
+                        unsavedDefinitions.Contains(definition)
+                    )
             );
 
             _unsavedManualCameraDefinitions.Clear();
@@ -3258,6 +3357,8 @@ namespace FlockSurveillance
             {
                 definition.IsDestroyed = false;
             }
+
+            PersistCameraDestructionStates();
 
             RefreshSaveManualCamerasItem();
 
@@ -3533,9 +3634,7 @@ namespace FlockSurveillance
             _photoDiscoveryReady = false;
             _startRenderItem.Enabled = false;
             _startRenderItem.Title = "Start Render";
-            _startRenderItem.Description =
-                "Rendering is in progress. Press Esc or B to save " +
-                "progress and cancel.";
+            _startRenderItem.Description = StartRenderHelpText;
         }
 
         private void OnSharePhotosChanged(
@@ -3793,9 +3892,7 @@ namespace FlockSurveillance
             _startRenderItem.Enabled = _photoDiscoveryReady;
             _startRenderItem.Title = "Start Render";
             _startRenderItem.Description = _photoDiscoveryReady
-                ? "Render " + result.PendingPhotoCount.ToString("N0") +
-                    " queued photo" +
-                    (result.PendingPhotoCount == 1 ? "." : "s.")
+                ? StartRenderHelpText
                 : "No unrendered captures are currently waiting.";
 
             _generatedPhotosItem.AltTitle =

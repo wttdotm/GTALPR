@@ -37,6 +37,9 @@ namespace FlockSurveillance
         private readonly HashSet<string> _seatedPedIds =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        private readonly HashSet<string> _duplicateHeldWeaponPropIds =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         private readonly List<ScenePropDto> _propsToClone =
             new List<ScenePropDto>();
 
@@ -84,6 +87,7 @@ namespace FlockSurveillance
                 useFrustum
             );
 
+            IndexDuplicateHeldWeaponProps();
             IndexSceneEntities();
             BuildCloneAndModelPlan();
             EnsurePoolCapacity();
@@ -450,6 +454,16 @@ namespace FlockSurveillance
 
             foreach (ScenePropDto prop in _selection.Props)
             {
+                if (
+                    prop?.Entity != null &&
+                    _duplicateHeldWeaponPropIds.Contains(
+                        prop.Entity.EntityId
+                    )
+                )
+                {
+                    continue;
+                }
+
                 Prop existing;
 
                 if (IsPreferExistingPolicy(prop) &&
@@ -472,6 +486,83 @@ namespace FlockSurveillance
             )
             {
                 AddModel(projectile?.Entity);
+            }
+        }
+
+        private void IndexDuplicateHeldWeaponProps()
+        {
+            Dictionary<string, int> weaponModelByPedId =
+                new Dictionary<string, int>(
+                    StringComparer.OrdinalIgnoreCase
+                );
+
+            foreach (ScenePedDto ped in _selection.Peds)
+            {
+                if (
+                    ped?.Entity == null ||
+                    string.IsNullOrWhiteSpace(ped.Entity.EntityId) ||
+                    ped.CurrentWeapon == null ||
+                    ped.CurrentWeapon.Hash == 0
+                )
+                {
+                    continue;
+                }
+
+                try
+                {
+                    uint modelHash = Function.Call<uint>(
+                        Hash.GET_WEAPONTYPE_MODEL,
+                        unchecked((uint)ped.CurrentWeapon.Hash)
+                    );
+
+                    if (modelHash != 0u)
+                    {
+                        weaponModelByPedId[ped.Entity.EntityId] =
+                            unchecked((int)modelHash);
+                    }
+                }
+                catch
+                {
+                    // Historical duplicate suppression is best effort. New
+                    // manifests exclude these live weapon objects directly.
+                }
+            }
+
+            foreach (ScenePropDto prop in _selection.Props)
+            {
+                SceneCommonEntityDto common = prop?.Entity;
+
+                if (
+                    common == null ||
+                    string.IsNullOrWhiteSpace(common.EntityId)
+                )
+                {
+                    continue;
+                }
+
+                string parentId = common.AttachedToEntityId;
+
+                if (
+                    string.IsNullOrWhiteSpace(parentId) &&
+                    common.Attachment != null
+                )
+                {
+                    parentId = common.Attachment.ParentEntityId;
+                }
+
+                int weaponModelHash;
+
+                if (
+                    !string.IsNullOrWhiteSpace(parentId) &&
+                    weaponModelByPedId.TryGetValue(
+                        parentId,
+                        out weaponModelHash
+                    ) &&
+                    common.ModelHash == weaponModelHash
+                )
+                {
+                    _duplicateHeldWeaponPropIds.Add(common.EntityId);
+                }
             }
         }
 

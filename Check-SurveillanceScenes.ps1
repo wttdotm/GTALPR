@@ -693,7 +693,7 @@ foreach ($file in $files) {
     }
     elseif (
         [int64]$scene.MinimumReaderVersion -lt 1 -or
-        [int64]$scene.MinimumReaderVersion -gt 2
+        [int64]$scene.MinimumReaderVersion -gt 4
     ) {
         Add-Issue `
             $fileIssues `
@@ -1038,6 +1038,168 @@ foreach ($file in $files) {
                     "Camera '$cameraId' destruction metadata requires MinimumReaderVersion 2."
             }
 
+            $explosiveProperty =
+                $destruction.PSObject.Properties[
+                    "DestroyedByExplosiveWeapon"
+                ]
+            $explosiveNameProperty =
+                $destruction.PSObject.Properties[
+                    "DestroyingExplosiveWeapon"
+                ]
+            $destroyedByExplosiveWeapon = $false
+
+            if ($null -ne $explosiveProperty) {
+                if ($explosiveProperty.Value -isnot [bool]) {
+                    Add-Issue `
+                        $fileIssues `
+                        "Error" `
+                        $relativeName `
+                        "Camera '$cameraId' DestroyedByExplosiveWeapon must be a JSON boolean."
+                }
+                else {
+                    $destroyedByExplosiveWeapon =
+                        [bool]$explosiveProperty.Value
+                }
+            }
+
+            $explosiveWeaponName = if (
+                $null -eq $explosiveNameProperty
+            ) {
+                ""
+            }
+            else {
+                [string]$explosiveNameProperty.Value
+            }
+
+            if ($destroyedByExplosiveWeapon) {
+                if (
+                    -not (Test-IsJsonInteger `
+                        $scene.MinimumReaderVersion) -or
+                    [int64]$scene.MinimumReaderVersion -lt 3 -or
+                    [string]::IsNullOrWhiteSpace(
+                        $explosiveWeaponName
+                    ) -or
+                    $explosiveWeaponName.Length -gt 64
+                ) {
+                    Add-Issue `
+                        $fileIssues `
+                        "Error" `
+                        $relativeName `
+                        "Camera '$cameraId' has invalid explosive-destruction metadata."
+                }
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace(
+                $explosiveWeaponName
+            )) {
+                Add-Issue `
+                    $fileIssues `
+                    "Error" `
+                    $relativeName `
+                    "Camera '$cameraId' has inconsistent explosive-destruction metadata."
+            }
+
+            $weaponProperty =
+                $destruction.PSObject.Properties[
+                    "DestroyedByWeapon"
+                ]
+            $weaponHashProperty =
+                $destruction.PSObject.Properties[
+                    "DestroyingWeaponHash"
+                ]
+            $weaponNameProperty =
+                $destruction.PSObject.Properties[
+                    "DestroyingWeaponName"
+                ]
+            $destroyedByWeapon = $false
+
+            if ($null -ne $weaponProperty) {
+                if ($weaponProperty.Value -isnot [bool]) {
+                    Add-Issue `
+                        $fileIssues `
+                        "Error" `
+                        $relativeName `
+                        "Camera '$cameraId' DestroyedByWeapon must be a JSON boolean."
+                }
+                else {
+                    $destroyedByWeapon = [bool]$weaponProperty.Value
+                }
+            }
+
+            $weaponHashValid =
+                $null -ne $weaponHashProperty -and
+                (Test-IsJsonInteger $weaponHashProperty.Value)
+            $weaponHash = if ($weaponHashValid) {
+                [int64]$weaponHashProperty.Value
+            }
+            else {
+                0
+            }
+            $weaponName = if ($null -eq $weaponNameProperty) {
+                ""
+            }
+            else {
+                [string]$weaponNameProperty.Value
+            }
+            $hasWeaponHash = $weaponHashValid -and $weaponHash -ne 0
+            $hasWeaponName =
+                -not [string]::IsNullOrWhiteSpace($weaponName)
+
+            if (
+                (Test-IsJsonInteger $scene.MinimumReaderVersion) -and
+                [int64]$scene.MinimumReaderVersion -ge 4 -and
+                (
+                    $null -eq $weaponProperty -or
+                    -not $weaponHashValid -or
+                    $null -eq $weaponNameProperty
+                )
+            ) {
+                Add-Issue `
+                    $fileIssues `
+                    "Error" `
+                    $relativeName `
+                    "Camera '$cameraId' version-4 weapon metadata is incomplete."
+            }
+
+            if ($destroyedByWeapon) {
+                if (
+                    -not (Test-IsJsonInteger `
+                        $scene.MinimumReaderVersion) -or
+                    [int64]$scene.MinimumReaderVersion -lt 4 -or
+                    $hasWeaponHash -ne $hasWeaponName -or
+                    $weaponName.Length -gt 64
+                ) {
+                    Add-Issue `
+                        $fileIssues `
+                        "Error" `
+                        $relativeName `
+                        "Camera '$cameraId' has invalid weapon-destruction metadata."
+                }
+            }
+            elseif ($hasWeaponHash -or $hasWeaponName) {
+                Add-Issue `
+                    $fileIssues `
+                    "Error" `
+                    $relativeName `
+                    "Camera '$cameraId' has inconsistent weapon-destruction metadata."
+            }
+
+            if (
+                $destroyedByWeapon -and
+                $destroyedByExplosiveWeapon -and
+                $hasWeaponName -and
+                -not [string]::Equals(
+                    $weaponName,
+                    $explosiveWeaponName,
+                    [StringComparison]::Ordinal
+                )
+            ) {
+                Add-Issue `
+                    $fileIssues `
+                    "Error" `
+                    $relativeName `
+                    "Camera '$cameraId' has conflicting destroying-weapon metadata."
+            }
+
             Test-Reference `
                 $propIds `
                 ([string]$destruction.DestroyedPropId) `
@@ -1269,6 +1431,24 @@ foreach ($file in $files) {
                 $relativeName `
                 "CaptureStats.$integerStat must be a JSON integer."
         }
+    }
+
+    $weaponObjectExclusionProperty =
+        $stats.PSObject.Properties["WeaponObjectPropsExcluded"]
+
+    if (
+        $null -ne $weaponObjectExclusionProperty -and
+        (
+            -not (Test-IsJsonInteger `
+                $weaponObjectExclusionProperty.Value) -or
+            [int64]$weaponObjectExclusionProperty.Value -lt 0
+        )
+    ) {
+        Add-Issue `
+            $fileIssues `
+            "Error" `
+            $relativeName `
+            "CaptureStats.WeaponObjectPropsExcluded must be a non-negative JSON integer."
     }
 
     foreach ($booleanStat in @(

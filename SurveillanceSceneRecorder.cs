@@ -559,6 +559,24 @@ namespace FlockSurveillance
                     CameraDestructionMinimumReaderVersion
             );
 
+            if (plan.DestroyedByExplosiveWeapon)
+            {
+                builder.Snapshot.MinimumReaderVersion = Math.Max(
+                    builder.Snapshot.MinimumReaderVersion,
+                    SurveillancePhotoLabManifestReader.
+                        ExplosiveDestructionMinimumReaderVersion
+                );
+            }
+
+            if (plan.DestroyedByWeapon)
+            {
+                builder.Snapshot.MinimumReaderVersion = Math.Max(
+                    builder.Snapshot.MinimumReaderVersion,
+                    SurveillancePhotoLabManifestReader.
+                        WeaponDestructionPoseMinimumReaderVersion
+                );
+            }
+
             bool targetIsVehicle = plan.Subject is Vehicle;
             string targetPedId = builder.GetEntityId(plan.Player.Handle);
             string targetVehicleId = targetIsVehicle
@@ -611,6 +629,15 @@ namespace FlockSurveillance
                     CaptureFrame = plan.CaptureFrame,
                     RequestedDelayFrames = plan.RequestedDelayFrames,
                     ActualDelayFrames = plan.ActualDelayFrames,
+                    DestroyedByWeapon = plan.DestroyedByWeapon,
+                    DestroyingWeaponHash =
+                        plan.DestroyingWeaponHash,
+                    DestroyingWeaponName =
+                        plan.DestroyingWeaponName,
+                    DestroyedByExplosiveWeapon =
+                        plan.DestroyedByExplosiveWeapon,
+                    DestroyingExplosiveWeapon =
+                        plan.DestroyingExplosiveWeapon,
                     SubjectKind = plan.SubjectKind,
                     SubjectPosition = SceneVector3Dto.From(
                         plan.SubjectCenter
@@ -822,6 +849,12 @@ namespace FlockSurveillance
                 cameraEyePosition,
                 propByHandle
             );
+            RemovePedWeaponObjectProps(
+                builder,
+                peds,
+                propByHandle,
+                requiredProp
+            );
 
             foreach (PropCandidate candidate in propByHandle.Values)
             {
@@ -833,6 +866,46 @@ namespace FlockSurveillance
             CapturePeds(builder, peds);
             CaptureProjectiles(builder, projectiles);
             CaptureProps(builder, props);
+        }
+
+        private static void RemovePedWeaponObjectProps(
+            SnapshotBuilder builder,
+            IEnumerable<Ped> peds,
+            IDictionary<int, PropCandidate> propByHandle,
+            Prop requiredProp
+        )
+        {
+            int requiredHandle = IsUsableEntity(requiredProp)
+                ? requiredProp.Handle
+                : 0;
+
+            foreach (Ped ped in peds)
+            {
+                try
+                {
+                    Prop weaponObject =
+                        ped?.Weapons?.CurrentWeaponObject;
+
+                    if (
+                        !IsUsableEntity(weaponObject) ||
+                        weaponObject.Handle == requiredHandle
+                    )
+                    {
+                        continue;
+                    }
+
+                    if (propByHandle.Remove(weaponObject.Handle))
+                    {
+                        builder.Snapshot.CaptureStats.
+                            WeaponObjectPropsExcluded++;
+                    }
+                }
+                catch
+                {
+                    // The weapon object is transient and optional. Failure to
+                    // inspect it must not cost the scene its owning ped.
+                }
+            }
         }
 
         private void AddNearbyVehicles(
@@ -3106,9 +3179,9 @@ namespace FlockSurveillance
         {
             return new List<string>
             {
-                "Exact ped animation phase, facial animation, and ragdoll pose",
+                "Exact ped animation phase, facial animation, and ragdoll pose; weapon destruction uses a synthetic aim pose",
                 "Freemode head blends, face morphs, overlays, hair/eye colors, and tattoos",
-                "Particles, smoke, explosions, projectile trails, and ropes",
+                "Exact/transient particles, smoke, explosion phase, projectile trails, and ropes; explosive camera destruction receives a synthetic replay",
                 "World decals such as blood, skid marks, and bullet holes",
                 "Exact vehicle deformation, glass fractures, and fragments",
                 "Detailed wheel/tire simulation state is omitted for recorder stability",
@@ -3305,6 +3378,11 @@ namespace FlockSurveillance
         public int CaptureFrame { get; set; }
         public int RequestedDelayFrames { get; set; }
         public int ActualDelayFrames { get; set; }
+        public bool DestroyedByWeapon { get; set; }
+        public int DestroyingWeaponHash { get; set; }
+        public string DestroyingWeaponName { get; set; }
+        public bool DestroyedByExplosiveWeapon { get; set; }
+        public string DestroyingExplosiveWeapon { get; set; }
         public string SubjectKind { get; set; }
         public SceneVector3Dto SubjectPosition { get; set; }
         public float SubjectDistance { get; set; }
@@ -3373,6 +3451,7 @@ namespace FlockSurveillance
         public int PickupsDiscovered { get; set; }
         public int PropsCaptured { get; set; }
         public int PropsSkipped { get; set; }
+        public int WeaponObjectPropsExcluded { get; set; }
         public int ProjectilesDiscovered { get; set; }
         public int ProjectilesCaptured { get; set; }
         public int ProjectilesSkipped { get; set; }
