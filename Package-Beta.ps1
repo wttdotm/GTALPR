@@ -9,6 +9,7 @@ $projectFile = Join-Path $repoRoot "FlockSurveillance.csproj"
 $releaseOutput = Join-Path $repoRoot "bin\Release\net48"
 $distRoot = Join-Path $repoRoot "dist"
 $packageRoot = Join-Path $distRoot "GTALPR-beta"
+$packageArchive = Join-Path $distRoot "GTALPR-beta.zip"
 $dlcSource = Join-Path $repoRoot "packaging\gtalpr\dlc.rpf"
 $saveStateSource = Join-Path $repoRoot "savestate"
 
@@ -47,6 +48,10 @@ $expectedPackageRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $repoRoot "dist\GTALPR-beta")
 )
 $resolvedPackageRoot = [System.IO.Path]::GetFullPath($packageRoot)
+$expectedPackageArchive = [System.IO.Path]::GetFullPath(
+    (Join-Path $repoRoot "dist\GTALPR-beta.zip")
+)
+$resolvedPackageArchive = [System.IO.Path]::GetFullPath($packageArchive)
 
 if (-not [string]::Equals(
     $resolvedPackageRoot,
@@ -55,6 +60,15 @@ if (-not [string]::Equals(
 ))
 {
     throw "Refusing unexpected package output path: $resolvedPackageRoot"
+}
+
+if (-not [string]::Equals(
+    $resolvedPackageArchive,
+    $expectedPackageArchive,
+    [System.StringComparison]::OrdinalIgnoreCase
+))
+{
+    throw "Refusing unexpected package archive path: $resolvedPackageArchive"
 }
 
 if (Test-Path -LiteralPath $resolvedPackageRoot)
@@ -94,6 +108,9 @@ Copy-Item -LiteralPath $dlcSource -Destination $dlcDestination -Force
 $saveStateDestination = Join-Path $resolvedPackageRoot "savestate"
 Copy-Item -LiteralPath $saveStateSource -Destination $saveStateDestination -Recurse -Force
 
+Compress-Archive -LiteralPath $resolvedPackageRoot -DestinationPath $resolvedPackageArchive -CompressionLevel Optimal -Force
+
 Write-Host ""
 Write-Host "GTALPR beta package created at:"
 Write-Host $resolvedPackageRoot
+Write-Host $resolvedPackageArchive
