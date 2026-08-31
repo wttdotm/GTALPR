@@ -34,27 +34,31 @@ in GTA Online. GTA V Enhanced is not supported by this beta.
 #### GTALPR Install:
 
 1. Close GTA V and go to your GTA V folder. We'll call that folder `<GTA V>`
-2. In that folder, make a `mods` folder and a `scripts` folder.
-3. Copy the files from the GTALPR `scripts` folder into the new `scripts` folder you just made.
-4. Copy the folder from the GTALPR `mods` folder called `update` into the new `mods` folder you just made.
-5. In your GTA folder, there is a folder called `<GTA V>\update\` that has two files in it called `update.rpf` and `update2.rpf`, copy them both into the `<GTA V>\mods\update` folder that you just pasted in.
-6. Your GTAV folder should now look like this (aside from the many other files in there):
+2. Copy the `scripts` folder from this package into the GTA V folder, so you now have `<GTA V>\scripts`
+3. Copy the `mods` folder from this package into the GTA V folder, so you now have `<GTA V>\mods`
+4. In your GTA folder, there is a folder called `<GTA V>\update\` that has two files in it called `update.rpf` and `update2.rpf`, copy them both into `<GTA V>\mods\update`.
+5. Your GTAV folder should now look like this (aside from the many other files in there):
 ```
 <GTA V>/
 ├── scripts/
 │   ├── GTALPR.dll
 │   ├── LemonUI.SHVDN3.dll
 │   └── in_game_cameras.json
+│
 └── mods/
-    └── update/
-        ├── update.rpf/
-        ├── update2.rpf/
-        └── x64/
+│   └── update/
+│       ├── x64/
+│       ├── update2.rpf/ [copied from below folder]
+│       └── update.rpf/  [copied from below folder]
+│
+└── update/ [no changes, just for reference]
+    ├── update.rpf/
+    └── update2.rpf/
 ```
 
-7. Open OpenIV, turn on edit mode, and go to `<GTA V>\mods\update\update.rpf\common\data\dlclist.xml`. Right click on it and select "edit."
-8. Add `<Item>dlcpacks:/gtalpr/</Item>` as the last line before the closing `</Paths>` tag
-9. Save and you're done!
+6. Open OpenIV, turn on edit mode, and go to `<GTA V>\mods\update\update.rpf\common\data\dlclist.xml`. Right click on it and select "edit."
+7. Add `<Item>dlcpacks:/gtalpr/</Item>` as the last line before the closing `</Paths>` tag
+8. Save and you're done!
 
 *The mod should now be ready to play :)*
 
