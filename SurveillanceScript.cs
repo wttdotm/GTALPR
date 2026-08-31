@@ -28,6 +28,10 @@ namespace FlockSurveillance
         private readonly ManualCameraStore _manualCameraStore =
             new ManualCameraStore();
 
+        private readonly CameraDestructionStateStore
+            _cameraDestructionStateStore =
+                new CameraDestructionStateStore();
+
         // All user-created cameras, including cameras loaded from disk.
         private readonly List<CameraDefinition>
             _manualCameraDefinitions =
@@ -276,7 +280,8 @@ namespace FlockSurveillance
 
         private bool _capturePhotosEnabled = true;
         private bool _captureDestructionPhotosEnabled = true;
-        private bool _sharePhotosOptIn;
+        // Photo sharing is intentionally disabled for the beta.
+        // private bool _sharePhotosOptIn;
         private bool _photoMetricsRefreshQueued;
         private bool _photoMetricsDirtyAfterRender;
         private bool _refreshPhotoMetricsAfterSceneWrites;
@@ -391,12 +396,12 @@ namespace FlockSurveillance
                 Enabled = false
             };
 
-        private readonly NativeCheckboxItem _sharePhotosItem =
-            new NativeCheckboxItem(
-                "Opt In To Share Photos",
-                "Consent preference only; sharing will be wired later.",
-                false
-            );
+        // private readonly NativeCheckboxItem _sharePhotosItem =
+        //     new NativeCheckboxItem(
+        //         "Opt In To Share Photos",
+        //         "Consent preference only; sharing will be wired later.",
+        //         false
+        //     );
 
         private readonly NativeItem _photoInformationItem =
             new NativeItem(
@@ -506,8 +511,8 @@ namespace FlockSurveillance
             _startRenderItem.Colors.AltTitleNormal = renderReadyColor;
             _startRenderItem.Colors.AltTitleHovered = renderReadyColor;
 
-            _sharePhotosItem.CheckboxChanged +=
-                OnSharePhotosChanged;
+            // _sharePhotosItem.CheckboxChanged +=
+            //     OnSharePhotosChanged;
 
             _photosMenu.Opening +=
                 OnPhotosMenuOpening;
@@ -529,10 +534,10 @@ namespace FlockSurveillance
             _photosMenu.Add(_cctvStrengthItem);
             _photosMenu.Add(_frustumEntityLoadingItem);
 
-            _photosMenu.Add(
-                new NativeSeparatorItem("SHARING")
-            );
-            _photosMenu.Add(_sharePhotosItem);
+            // _photosMenu.Add(
+            //     new NativeSeparatorItem("SHARING")
+            // );
+            // _photosMenu.Add(_sharePhotosItem);
 
             _photosMenu.Add(
                 new NativeSeparatorItem("INFORMATION")
@@ -1374,8 +1379,7 @@ namespace FlockSurveillance
 
             try
             {
-                string cameraPath = Path.Combine(
-                    "scripts",
+                string cameraPath = GetRelativeFilePath(
                     "in_game_cameras.json"
                 );
 
@@ -1471,6 +1475,41 @@ namespace FlockSurveillance
                 );
             }
 
+            Dictionary<string, bool> destructionStates =
+                _cameraDestructionStateStore.Load();
+
+            foreach (
+                CameraDefinition definition
+                in _cameraDefinitions
+            )
+            {
+                bool isDestroyed;
+
+                if (
+                    definition != null &&
+                    !string.IsNullOrWhiteSpace(
+                        definition.FlockCameraId
+                    ) &&
+                    destructionStates.TryGetValue(
+                        definition.FlockCameraId,
+                        out isDestroyed
+                    )
+                )
+                {
+                    definition.IsDestroyed = isDestroyed;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(
+                _cameraDestructionStateStore.LastError
+            ))
+            {
+                GTA.UI.Notification.Show(
+                    "~y~Camera destruction state could not be loaded.~s~ " +
+                    _cameraDestructionStateStore.LastError
+                );
+            }
+
             RefreshCameraCatalogIdentity();
             RefreshSaveManualCamerasItem();
 
@@ -1504,32 +1543,13 @@ namespace FlockSurveillance
                 }
             }
 
-            string error;
-
-            if (!CameraJsonDestructionStateStore.Save(
-                Path.Combine(
-                    "scripts",
-                    "in_game_cameras.json"
-                ),
-                destructionStates,
-                out error
+            if (!_cameraDestructionStateStore.Save(
+                destructionStates
             ))
             {
                 GTA.UI.Notification.Show(
                     "~r~Camera destruction state could not be saved.~s~ " +
-                    error
-                );
-            }
-
-            if (!CameraJsonDestructionStateStore.Save(
-                _manualCameraStore.CameraPath,
-                destructionStates,
-                out error
-            ))
-            {
-                GTA.UI.Notification.Show(
-                    "~r~Manual camera destruction state could not be saved.~s~ " +
-                    error
+                    _cameraDestructionStateStore.LastError
                 );
             }
         }
@@ -3637,14 +3657,14 @@ namespace FlockSurveillance
             _startRenderItem.Description = StartRenderHelpText;
         }
 
-        private void OnSharePhotosChanged(
-            object sender,
-            EventArgs e
-        )
-        {
-            _sharePhotosOptIn =
-                _sharePhotosItem.Checked;
-        }
+        // private void OnSharePhotosChanged(
+        //     object sender,
+        //     EventArgs e
+        // )
+        // {
+        //     _sharePhotosOptIn =
+        //         _sharePhotosItem.Checked;
+        // }
 
         private void OnPhotosMenuOpening(
             object sender,

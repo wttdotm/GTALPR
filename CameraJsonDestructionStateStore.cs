@@ -5,95 +5,172 @@ using System.Web.Script.Serialization;
 
 namespace FlockSurveillance
 {
-    internal static class CameraJsonDestructionStateStore
+    /// <summary>
+    /// Stores mutable camera destruction state outside the shipped camera
+    /// catalog so upgrades never overwrite player progress and the mod never
+    /// needs write access to its install directory.
+    /// </summary>
+    internal sealed class CameraDestructionStateStore
     {
-        public static bool Save(
-            string cameraPath,
-            IReadOnlyDictionary<string, bool> destructionStates,
-            out string error
-        )
+        private readonly JavaScriptSerializer _serializer =
+            new JavaScriptSerializer
+            {
+                MaxJsonLength = int.MaxValue
+            };
+
+        public CameraDestructionStateStore()
         {
-            error = null;
+            string root = Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData
+            );
+
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                root = Environment.GetFolderPath(
+                    Environment.SpecialFolder.MyDocuments
+                );
+            }
+
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                root = Path.GetTempPath();
+            }
+
+            StatePath = Path.Combine(
+                root,
+                "FlockSurveillance",
+                "camera_destruction_states.json"
+            );
+        }
+
+        public string StatePath { get; }
+
+        public string LastError { get; private set; }
+
+        public Dictionary<string, bool> Load()
+        {
+            LastError = null;
 
             try
             {
-                if (!File.Exists(cameraPath))
+                if (!File.Exists(StatePath))
                 {
-                    return true;
+                    return CreateEmptyStateDictionary();
                 }
 
-                JavaScriptSerializer serializer =
-                    new JavaScriptSerializer
-                    {
-                        MaxJsonLength = int.MaxValue
-                    };
+                Dictionary<string, bool> savedStates =
+                    _serializer.Deserialize<
+                        Dictionary<string, bool>
+                    >(File.ReadAllText(StatePath));
 
-                object[] cameraDefinitions =
-                    serializer.DeserializeObject(
-                        File.ReadAllText(cameraPath)
-                    ) as object[];
+                Dictionary<string, bool> normalizedStates =
+                    CreateEmptyStateDictionary();
 
-                if (cameraDefinitions == null)
+                if (savedStates == null)
                 {
-                    throw new InvalidDataException(
-                        "Camera JSON root is not an array."
-                    );
+                    return normalizedStates;
                 }
 
                 foreach (
-                    object cameraDefinition
-                    in cameraDefinitions
+                    KeyValuePair<string, bool> savedState
+                    in savedStates
                 )
                 {
-                    Dictionary<string, object> definition =
-                        cameraDefinition as
-                            Dictionary<string, object>;
-
-                    object cameraIdValue;
-                    bool isDestroyed;
-
-                    if (
-                        definition != null &&
-                        definition.TryGetValue(
-                            "FlockCameraId",
-                            out cameraIdValue
-                        ) &&
-                        cameraIdValue != null &&
-                        destructionStates.TryGetValue(
-                            cameraIdValue.ToString().Trim(),
-                            out isDestroyed
-                        )
-                    )
+                    if (!string.IsNullOrWhiteSpace(savedState.Key))
                     {
-                        definition.Remove("IsDestroyed");
-                        definition["isDestroyed"] =
-                            isDestroyed;
+                        normalizedStates[savedState.Key.Trim()] =
+                            savedState.Value;
                     }
                 }
 
-                string temporaryPath =
-                    cameraPath + ".tmp";
+                return normalizedStates;
+            }
+            catch (Exception exception)
+            {
+                LastError = exception.Message;
+                return CreateEmptyStateDictionary();
+            }
+        }
+
+        public bool Save(
+            IReadOnlyDictionary<string, bool> destructionStates
+        )
+        {
+            LastError = null;
+
+            try
+            {
+                if (destructionStates == null)
+                {
+                    throw new ArgumentNullException(
+                        nameof(destructionStates)
+                    );
+                }
+
+                Dictionary<string, bool> normalizedStates =
+                    CreateEmptyStateDictionary();
+
+                foreach (
+                    KeyValuePair<string, bool> destructionState
+                    in destructionStates
+                )
+                {
+                    if (!string.IsNullOrWhiteSpace(
+                        destructionState.Key
+                    ))
+                    {
+                        normalizedStates[
+                            destructionState.Key.Trim()
+                        ] = destructionState.Value;
+                    }
+                }
+
+                string directory =
+                    Path.GetDirectoryName(StatePath);
+
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                string temporaryPath = StatePath + ".tmp";
 
                 File.WriteAllText(
                     temporaryPath,
-                    serializer.Serialize(
-                        cameraDefinitions
-                    )
+                    _serializer.Serialize(normalizedStates)
                 );
 
-                File.Replace(
-                    temporaryPath,
-                    cameraPath,
-                    null
-                );
+                if (File.Exists(StatePath))
+                {
+                    File.Replace(
+                        temporaryPath,
+                        StatePath,
+                        null
+                    );
+                }
+                else
+                {
+                    File.Move(
+                        temporaryPath,
+                        StatePath
+                    );
+                }
 
                 return true;
             }
             catch (Exception exception)
             {
-                error = exception.Message;
+                LastError = exception.Message;
                 return false;
             }
+        }
+
+        private static Dictionary<string, bool>
+            CreateEmptyStateDictionary()
+        {
+            return new Dictionary<string, bool>(
+                StringComparer.Ordinal
+            );
         }
     }
 }

@@ -1,0 +1,1416 @@
+[
+  {
+    "FlockCameraId": "manual/custom-1787458951752",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -39.41,
+    "Y": -1630.987,
+    "Heading": 36
+  },
+  {
+    "FlockCameraId": "manual/sign-1787699471384",
+    "X": -11.839,
+    "Y": 132.24,
+    "Heading": 31
+  },
+  {
+    "FlockCameraId": "manual/sign-1787699759794",
+    "X": -1661.287,
+    "Y": -345.871,
+    "Heading": 239
+  },
+  {
+    "FlockCameraId": "manual/sign-1787699768356",
+    "X": -1576.145,
+    "Y": -213.037,
+    "Heading": 0
+  },
+  {
+    "FlockCameraId": "manual/sign-1787699781660",
+    "X": -1402.577,
+    "Y": -46.696,
+    "Heading": 191
+  },
+  {
+    "FlockCameraId": "manual/sign-1787699791765",
+    "X": -1695.638,
+    "Y": 95.678,
+    "Heading": 0
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700272624",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -1126.211,
+    "Y": -1379.779,
+    "Heading": 323
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700284349",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -1211.834,
+    "Y": -1261.159,
+    "Heading": 92
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700300158",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -1245.1,
+    "Y": -86.108,
+    "Heading": 111
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700306372",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -1133.01,
+    "Y": -143.837,
+    "Heading": 111
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700322001",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -594.83,
+    "Y": -373.518,
+    "Heading": 274
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700328209",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -432.94,
+    "Y": -380.165,
+    "Heading": 94
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700332291",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -161.757,
+    "Y": -395.487,
+    "Heading": 21
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700334968",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -188.032,
+    "Y": -468.525,
+    "Heading": 197
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700340358",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -91.945,
+    "Y": -169.369,
+    "Heading": 190
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700344356",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -53.505,
+    "Y": -6.252,
+    "Heading": 0
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700368855",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -778.178,
+    "Y": -47.124,
+    "Heading": 74
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700380164",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -792.314,
+    "Y": 273.866,
+    "Heading": 175
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700383911",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -835.167,
+    "Y": 232.855,
+    "Heading": 205
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700401688",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -1079.015,
+    "Y": 410.235,
+    "Heading": 171
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700437073",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 760.718,
+    "Y": -49.32,
+    "Heading": 226
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700442253",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 500.687,
+    "Y": -129.956,
+    "Heading": 56
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700445926",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 640.039,
+    "Y": -70.483,
+    "Heading": 306
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700452033",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 280.406,
+    "Y": -57.092,
+    "Heading": 169
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700454739",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 228.992,
+    "Y": -198.49,
+    "Heading": 163
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700457551",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 29.543,
+    "Y": -258.792,
+    "Heading": 161
+  },
+  {
+    "FlockCameraId": "manual/sign-1787700458706",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 184.975,
+    "Y": -319.192,
+    "Heading": 163
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701725626",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -1096.293,
+    "Y": -743.772,
+    "Heading": 141
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701759676",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -967.547,
+    "Y": -1199.936,
+    "Heading": 121
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701776135",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -290.844,
+    "Y": -1397.195,
+    "Heading": 128
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701823810",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -201.234,
+    "Y": -2611.25,
+    "Heading": 90
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701827022",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -383.615,
+    "Y": -2759.582,
+    "Heading": 225
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701832489",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 361.896,
+    "Y": -2404.296,
+    "Heading": 288
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701838939",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 719.651,
+    "Y": -2858.8,
+    "Heading": 11
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701851085",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 1172.56,
+    "Y": -3212.307,
+    "Heading": 270
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701855318",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 1122.065,
+    "Y": -3314.624,
+    "Heading": 259
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701884043",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 762.845,
+    "Y": -486.491,
+    "Heading": 315
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701888389",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 914.451,
+    "Y": -854.705,
+    "Heading": 81
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701914818",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 452.311,
+    "Y": -366.321,
+    "Heading": 27
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701918383",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 307.444,
+    "Y": -360.615,
+    "Heading": 161
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701933093",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -149.82,
+    "Y": -835.812,
+    "Heading": 15
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701936768",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -239.816,
+    "Y": -1128.373,
+    "Heading": 245
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701940222",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 34.562,
+    "Y": -1118.213,
+    "Heading": 117
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701945852",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 165.812,
+    "Y": -792.805,
+    "Heading": 149
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701956768",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -661.902,
+    "Y": -1526.287,
+    "Heading": 10
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701960644",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -777.669,
+    "Y": -1751.803,
+    "Heading": 0
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701964018",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -673.776,
+    "Y": -1691.685,
+    "Heading": 174
+  },
+  {
+    "FlockCameraId": "manual/sign-1787701969781",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -297.181,
+    "Y": -2128.414,
+    "Heading": 349
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702069442",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 1913.737,
+    "Y": -768.833,
+    "Heading": 305
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702078127",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 2418.109,
+    "Y": -457.003,
+    "Heading": 124
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702085669",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 2438.674,
+    "Y": -180.82,
+    "Heading": 207
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702091273",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 2639.545,
+    "Y": 411.169,
+    "Heading": 189
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702094513",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 2524.736,
+    "Y": 405.931,
+    "Heading": 8
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702107171",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 2131.922,
+    "Y": 1343.012,
+    "Heading": 141
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702126990",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 2710.324,
+    "Y": 1635.688,
+    "Heading": 287
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702134757",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 2163.266,
+    "Y": 3038.08,
+    "Heading": 114
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702142417",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 2134.871,
+    "Y": 3770.785,
+    "Heading": 239
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702145956",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 1835.175,
+    "Y": 3283.858,
+    "Heading": 330
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702163642",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 790.251,
+    "Y": -909.071,
+    "Heading": 179
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702166840",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 811.029,
+    "Y": -1278.98,
+    "Heading": 183
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702170350",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 841.12,
+    "Y": -1537.118,
+    "Heading": 183
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702174690",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 781.001,
+    "Y": -1907.925,
+    "Heading": 188
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702178171",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 734.275,
+    "Y": -2263.02,
+    "Heading": 178
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702181867",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 796.561,
+    "Y": -2231.956,
+    "Heading": 274
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702185496",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 930.661,
+    "Y": -2175.237,
+    "Heading": 4
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702187810",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 957.382,
+    "Y": -1876.754,
+    "Heading": 3
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702192911",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 894.55,
+    "Y": -2433.622,
+    "Heading": 150
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702206040",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 1619.589,
+    "Y": -2527.573,
+    "Heading": 250
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702211634",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 1895.519,
+    "Y": -1259.101,
+    "Heading": 166
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702251678",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 1339.454,
+    "Y": 628.507,
+    "Heading": 45
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702255057",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 1627.196,
+    "Y": 1133.547,
+    "Heading": 15
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702261163",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 2026.086,
+    "Y": 2571.039,
+    "Heading": 240
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702270926",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 1300.045,
+    "Y": 1545.893,
+    "Heading": 182
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702275794",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 545.691,
+    "Y": 2188.263,
+    "Heading": 79
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702280378",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 154.67,
+    "Y": 2112.901,
+    "Heading": 245
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702283886",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -269.112,
+    "Y": 1833.597,
+    "Heading": 270
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702289887",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -560.711,
+    "Y": 1851.001,
+    "Heading": 18
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702294267",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -789.862,
+    "Y": 2015.123,
+    "Heading": 125
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702299104",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -540.46,
+    "Y": 2757.608,
+    "Heading": 209
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702306691",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -332.207,
+    "Y": 2878.248,
+    "Heading": 35
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702317449",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -1133.058,
+    "Y": 2664.809,
+    "Heading": 78
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702323596",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -1528.442,
+    "Y": 2115.679,
+    "Heading": 359
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702335456",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -2087.562,
+    "Y": 2302.033,
+    "Heading": 326
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702340207",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -2975.683,
+    "Y": 1986.112,
+    "Heading": 340
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702345546",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -3137.323,
+    "Y": 913.332,
+    "Heading": 259
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702348707",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -3003.137,
+    "Y": 289.578,
+    "Heading": 206
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702354059",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -2487.519,
+    "Y": -191.028,
+    "Heading": 126
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702359855",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -2048.051,
+    "Y": -425.859,
+    "Heading": 91
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702368338",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -2028.417,
+    "Y": -173.896,
+    "Heading": 254
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702394674",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 38.771,
+    "Y": -756.155,
+    "Heading": 197
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702403374",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 562.335,
+    "Y": -1436.536,
+    "Heading": 281
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702409074",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 396.444,
+    "Y": -1761.31,
+    "Heading": 310
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702412838",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 525.801,
+    "Y": -2047.09,
+    "Heading": 260
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702418343",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 289.151,
+    "Y": -3040.423,
+    "Heading": 7
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702427090",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 263.652,
+    "Y": -2657.657,
+    "Heading": 100
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702451738",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 1009.01,
+    "Y": -1763.956,
+    "Heading": 272
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702460619",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 518.759,
+    "Y": -1678.774,
+    "Heading": 118
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702466972",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 344.857,
+    "Y": -1505.01,
+    "Heading": 258
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702475605",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 50.647,
+    "Y": -1476.409,
+    "Heading": 287
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702481570",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 348.766,
+    "Y": -1306.142,
+    "Heading": 213
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702483807",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 234.702,
+    "Y": -1440.336,
+    "Heading": 307
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702502891",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -1359.917,
+    "Y": -2426.703,
+    "Heading": 212
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702520218",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 333.255,
+    "Y": 401.097,
+    "Heading": 292
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702529345",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 420.79,
+    "Y": 1185.94,
+    "Heading": 173
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702532994",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 148.633,
+    "Y": 1382.301,
+    "Heading": 38
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702537299",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -474.116,
+    "Y": 1349.556,
+    "Heading": 45
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702546617",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -492.86,
+    "Y": 580.157,
+    "Heading": 220
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702582995",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -2145.086,
+    "Y": 443.813,
+    "Heading": 167
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702591699",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -1607.978,
+    "Y": 2826.345,
+    "Heading": 134
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702597810",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -2218.202,
+    "Y": 3361.964,
+    "Heading": 284
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702606055",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -2411.786,
+    "Y": 3924.821,
+    "Heading": 103
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702609202",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -1825.571,
+    "Y": 4400.094,
+    "Heading": 304
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702613424",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -1489.402,
+    "Y": 4983.951,
+    "Heading": 1
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702619778",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -264.866,
+    "Y": 6124.897,
+    "Heading": 130
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702622801",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 145.347,
+    "Y": 6550.314,
+    "Heading": 180
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702626474",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": -102.483,
+    "Y": 6446.145,
+    "Heading": 226
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702642268",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 3351.608,
+    "Y": 4962.862,
+    "Heading": 305
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702646048",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 3493.442,
+    "Y": 4683.139,
+    "Heading": 184
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702651589",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 3334.666,
+    "Y": 3671.415,
+    "Heading": 323
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702655749",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 3055.801,
+    "Y": 4085.196,
+    "Heading": 167
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702660140",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 2984.505,
+    "Y": 4636.987,
+    "Heading": 261
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702667221",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 2227.441,
+    "Y": 4957.444,
+    "Heading": 350
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702670480",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 1661.691,
+    "Y": 4940.639,
+    "Heading": 168
+  },
+  {
+    "FlockCameraId": "manual/sign-1787702708835",
+    "osmType": "manual",
+    "osmId": 67,
+    "X": 2400.671,
+    "Y": 5167.101,
+    "Heading": 117
+  },
+  {
+    "FlockCameraId": "node/12732032796",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1683.193,
+    "Y": -575.712,
+    "Heading": 342
+  },
+  {
+    "FlockCameraId": "node/12732032797",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1446.013,
+    "Y": -774.122,
+    "Heading": 15
+  },
+  {
+    "FlockCameraId": "node/12732032798",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1249.662,
+    "Y": -1033.322,
+    "Heading": 336
+  },
+  {
+    "FlockCameraId": "node/12732032799",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1325.938,
+    "Y": -675.906,
+    "Heading": 31
+  },
+  {
+    "FlockCameraId": "node/12732047301",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -650.327,
+    "Y": -726.309,
+    "Heading": 20
+  },
+  {
+    "FlockCameraId": "node/12766805713",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1358.942,
+    "Y": 213.146,
+    "Heading": 245
+  },
+  {
+    "FlockCameraId": "node/12766805714",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1064.348,
+    "Y": 261.977,
+    "Heading": 270
+  },
+  {
+    "FlockCameraId": "node/12981362152",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 12.3,
+    "Y": -2040.299,
+    "Heading": 264
+  },
+  {
+    "FlockCameraId": "node/12981362155",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -103.955,
+    "Y": -1747.499,
+    "Heading": 338
+  },
+  {
+    "FlockCameraId": "node/12986651926",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1488.877,
+    "Y": -691.436,
+    "Heading": 276
+  },
+  {
+    "FlockCameraId": "node/12986651927",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1365.471,
+    "Y": -572.28,
+    "Heading": 326
+  },
+  {
+    "FlockCameraId": "node/13000932806",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 189.799,
+    "Y": -1794.734,
+    "Heading": 340
+  },
+  {
+    "FlockCameraId": "node/13027425143",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -235.279,
+    "Y": -1847.673,
+    "Heading": 325
+  },
+  {
+    "FlockCameraId": "node/13178159060",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -395.858,
+    "Y": -1807.821,
+    "Heading": 134
+  },
+  {
+    "FlockCameraId": "node/13274461712",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1362.351,
+    "Y": -817.357,
+    "Heading": 316
+  },
+  {
+    "FlockCameraId": "node/13438905001",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -401.642,
+    "Y": -959.073,
+    "Heading": 1
+  },
+  {
+    "FlockCameraId": "node/13545004601",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -929.178,
+    "Y": -248.331,
+    "Heading": 301
+  },
+  {
+    "FlockCameraId": "node/13588929401",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1958.736,
+    "Y": 510.623,
+    "Heading": 333
+  },
+  {
+    "FlockCameraId": "node/13591838788",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -911.866,
+    "Y": -2092.869,
+    "Heading": 175
+  },
+  {
+    "FlockCameraId": "node/13649027301",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 1063.371,
+    "Y": -219.6,
+    "Heading": 294
+  },
+  {
+    "FlockCameraId": "node/13680913101",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 166.454,
+    "Y": -1616.308,
+    "Heading": 323
+  },
+  {
+    "FlockCameraId": "node/13714820396",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -401.187,
+    "Y": -1392.634,
+    "Heading": 0
+  },
+  {
+    "FlockCameraId": "node/13726091001",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1277.413,
+    "Y": -370.377,
+    "Heading": 138
+  },
+  {
+    "FlockCameraId": "node/13726099901",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1479.994,
+    "Y": -450.27,
+    "Heading": 64
+  },
+  {
+    "FlockCameraId": "node/13726115101",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -412.246,
+    "Y": 1.572,
+    "Heading": 282
+  },
+  {
+    "FlockCameraId": "node/13736280601",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 30.355,
+    "Y": 276.033,
+    "Heading": 156
+  },
+  {
+    "FlockCameraId": "node/13738747401",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 1313.07,
+    "Y": -2449.864,
+    "Heading": 13
+  },
+  {
+    "FlockCameraId": "node/13738751001",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 1115.666,
+    "Y": -2568.547,
+    "Heading": 8
+  },
+  {
+    "FlockCameraId": "node/13738754301",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 1432.354,
+    "Y": -1781.65,
+    "Heading": 242
+  },
+  {
+    "FlockCameraId": "node/13743963302",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -32.497,
+    "Y": -1457.905,
+    "Heading": 173
+  },
+  {
+    "FlockCameraId": "node/13746399101",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -138.909,
+    "Y": -1557.269,
+    "Heading": 24
+  },
+  {
+    "FlockCameraId": "node/13772974902",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 536.667,
+    "Y": 90.071,
+    "Heading": 278
+  },
+  {
+    "FlockCameraId": "node/13799946302",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1408.78,
+    "Y": 618.835,
+    "Heading": 82
+  },
+  {
+    "FlockCameraId": "node/13799947001",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1843.893,
+    "Y": 497.314,
+    "Heading": 148
+  },
+  {
+    "FlockCameraId": "node/13874629701",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -995.375,
+    "Y": -1125.567,
+    "Heading": 323
+  },
+  {
+    "FlockCameraId": "node/13920728402",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1081.699,
+    "Y": -1463.108,
+    "Heading": 152
+  },
+  {
+    "FlockCameraId": "node/13920736601",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1031.659,
+    "Y": -1559.482,
+    "Heading": 348
+  },
+  {
+    "FlockCameraId": "node/13936976901",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 1173.795,
+    "Y": -882.898,
+    "Heading": 8
+  },
+  {
+    "FlockCameraId": "node/13936976902",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1425.038,
+    "Y": 492.234,
+    "Heading": 9
+  },
+  {
+    "FlockCameraId": "node/13963537528",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 1184.587,
+    "Y": -495.962,
+    "Heading": 195
+  },
+  {
+    "FlockCameraId": "node/13991290302",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1069.71,
+    "Y": -1023.055,
+    "Heading": 2
+  },
+  {
+    "FlockCameraId": "node/13991291301",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1172.478,
+    "Y": -825.182,
+    "Heading": 175
+  },
+  {
+    "FlockCameraId": "node/14024838201",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 819.365,
+    "Y": -51.915,
+    "Heading": 291
+  },
+  {
+    "FlockCameraId": "node/14040117401",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -449.297,
+    "Y": 245.361,
+    "Heading": 89
+  },
+  {
+    "FlockCameraId": "node/14040118701",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -121.647,
+    "Y": 254.765,
+    "Heading": 275
+  },
+  {
+    "FlockCameraId": "node/14045112401",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 1272.019,
+    "Y": -2079.165,
+    "Heading": 225
+  },
+  {
+    "FlockCameraId": "node/14045114801",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 1278.659,
+    "Y": -1459.32,
+    "Heading": 211
+  },
+  {
+    "FlockCameraId": "node/14045119101",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 1243.59,
+    "Y": -1287.33,
+    "Heading": 157
+  },
+  {
+    "FlockCameraId": "node/14059885901",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -997.193,
+    "Y": -799.998,
+    "Heading": 129
+  },
+  {
+    "FlockCameraId": "node/14065057002",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -813.786,
+    "Y": 832.834,
+    "Heading": 234
+  },
+  {
+    "FlockCameraId": "node/14066999401",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1202.641,
+    "Y": -1179.801,
+    "Heading": 336
+  },
+  {
+    "FlockCameraId": "node/14067041002",
+    "osmType": "node",
+    "osmId": 67,
+    "X": -1263.37,
+    "Y": -1468.166,
+    "Heading": 339
+  },
+  {
+    "FlockCameraId": "node/14084444001",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 492.434,
+    "Y": -1116.717,
+    "Heading": 0
+  },
+  {
+    "FlockCameraId": "node/14104300302",
+    "osmType": "node",
+    "osmId": 67,
+    "X": 247.75,
+    "Y": 195.289,
+    "Heading": 276
+  }
+]
