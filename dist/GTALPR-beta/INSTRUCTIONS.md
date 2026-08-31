@@ -19,13 +19,11 @@ in GTA Online. GTA V Enhanced is not supported by this beta.
 
 1. Install GTA V Legacy with Story Mode, however is easiest for you.
 2. Find where your GTA folder actually lives (like, where GTAV.exe is). You are gonna copy some stuff into here. On steam this is the folder shown by Library -> Right click GTA V Legacy -> Browse Local Files.
-2. Download Script Hook V and copy the files in the `bin` folder (not the folder itself, just the files) right into your GTA folder:
-   <https://www.dev-c.com/gtav/scripthookv/>
-3. Download ScriptHookVDotNet v3 (use the most recent nightly release here) and copy all the files that start with "ScriptHookVDotNet" into your GTA folder.
-   <https://github.com/scripthookvdotnet/scripthookvdotnet-nightly/releases>
-4. Download OpenIV and install it. Once installed, open it, go to Tools, click ASI Manager, and install the OpenIV ASI loader.
-5. Download and install the .NET Framework 4.8. https://dotnet.microsoft.com/en-us/download/dotnet-framework/net48 and Use either of the "Run Apps  - Runtime" installers.
-6. Download and the current Microsoft Visual C++ x64 runtime. [For Visual C++ x64runtime ]CHECK IF NECESSARY
+2. Download [Script Hook V](https://www.dev-c.com/gtav/scripthookv/) and copy the files in the `bin` folder (not the folder itself, just the files) right into your GTA folder
+3. Download [ScriptHookVDotNet v3](https://github.com/scripthookvdotnet/scripthookvdotnet-nightly/releases) (use the most recent nightly release here) and copy all the files that start with "ScriptHookVDotNet" into your GTA folder.
+4. Download [OpenIV](https://openiv.com) and install it. Once installed, open it, go to Tools, click ASI Manager, and install the OpenIV ASI loader.
+5. Download and install the [.NET Framework 4.8.](https://dotnet.microsoft.com/en-us/download/dotnet-framework/net48) and use either of the "Run Apps  - Runtime" installers.
+6. Download and the current [Microsoft Visual C++](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#visual-c-v14-redistributable) runtime for whatever architecture you have (x64, x86, or ARM64).
 7. Restart your computer.
 
 *If you want, you can check if everything is working by loading GTA and pressing f4. If you see a command line pop up, you're in!*
@@ -36,7 +34,7 @@ in GTA Online. GTA V Enhanced is not supported by this beta.
 1. Close GTA V and go to your GTA V folder. We'll call that folder `<GTA V>`
 2. Copy the `scripts` folder from this package into the GTA V folder, so you now have `<GTA V>\scripts`
 3. Copy the `mods` folder from this package into the GTA V folder, so you now have `<GTA V>\mods`
-4. In your GTA folder, there is a folder called `<GTA V>\update\` that has two files in it called `update.rpf` and `update2.rpf`, copy them both into `<GTA V>\mods\update`.
+4. In your GTA folder, there is a folder called `<GTA V>\update` that has two files in it that we need called `update.rpf` and `update2.rpf`, copy them both into `<GTA V>\mods\update` alongside the existing `x64` folder that is in there.
 5. Your GTAV folder should now look like this (aside from the many other files in there):
 ```
 <GTA V>/
