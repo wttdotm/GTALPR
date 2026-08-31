@@ -10,10 +10,16 @@ $releaseOutput = Join-Path $repoRoot "bin\Release\net48"
 $distRoot = Join-Path $repoRoot "dist"
 $packageRoot = Join-Path $distRoot "GTALPR-beta"
 $dlcSource = Join-Path $repoRoot "packaging\gtalpr\dlc.rpf"
+$saveStateSource = Join-Path $repoRoot "savestate"
 
 if (-not (Test-Path -LiteralPath $dlcSource -PathType Leaf))
 {
     throw "Missing standalone GTALPR DLC archive: $dlcSource"
+}
+
+if (-not (Test-Path -LiteralPath $saveStateSource -PathType Container))
+{
+    throw "Missing beta savestate directory: $saveStateSource"
 }
 
 & dotnet build $projectFile --configuration Release
@@ -84,6 +90,9 @@ Copy-Item -LiteralPath $catalogSource -Destination $catalogDestination -Force
 
 $dlcDestination = Join-Path $dlcDirectory "dlc.rpf"
 Copy-Item -LiteralPath $dlcSource -Destination $dlcDestination -Force
+
+$saveStateDestination = Join-Path $resolvedPackageRoot "savestate"
+Copy-Item -LiteralPath $saveStateSource -Destination $saveStateDestination -Recurse -Force
 
 Write-Host ""
 Write-Host "GTALPR beta package created at:"
