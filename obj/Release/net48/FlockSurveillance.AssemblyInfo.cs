@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("GTALPR")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+481ef3201dca8d7470a971e51c35cd2b98b70fbd")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+1e2b51d1f7834bf575678100c880315cf4600572")]
 [assembly: System.Reflection.AssemblyProductAttribute("GTALPR")]
 [assembly: System.Reflection.AssemblyTitleAttribute("GTALPR")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
