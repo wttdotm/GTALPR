@@ -44,6 +44,10 @@ namespace FlockSurveillance
         private readonly SurveillanceSceneRecorder _sceneRecorder =
             new SurveillanceSceneRecorder();
 
+        private readonly SurveillanceCameraDestructionCaptureCoordinator
+            _cameraDestructionCapture =
+                new SurveillanceCameraDestructionCaptureCoordinator();
+
         private readonly SurveillancePhotoLab _photoLab =
             new SurveillancePhotoLab();
 
@@ -148,6 +152,9 @@ namespace FlockSurveillance
         private readonly ObjectPool _controlPanelPool =
             new ObjectPool();
 
+        private readonly LearnMorePopup _learnMorePopup =
+            new LearnMorePopup();
+
         private readonly NativeMenu _controlPanelMenu =
             new NativeMenu(
                 "GTALPR",
@@ -188,6 +195,21 @@ namespace FlockSurveillance
             {
                 Enabled = false
             };
+
+        private readonly NativeItem _learnMoreItem =
+            new NativeItem(
+                "Learn More",
+                "Learn more about Flock cameras and what you can do."
+            );
+
+        private readonly NativeItem _creditsItem =
+            new NativeItem(
+                "Credits",
+                "~h~Mod Creation & Development:~s~~n~" +
+                "Morry Kolman @WTTDOTM~n~~n~" +
+                "~h~Flock Camera 3D Model:~s~~n~" +
+                "Sean Kennedy @aie_sean"
+            );
 
         //stats stuff
         private readonly SurveillanceStatsStore _statsStore =
@@ -243,9 +265,11 @@ namespace FlockSurveillance
         private const float CctvStrengthStep = 0.05f;
 
         private bool _capturePhotosEnabled = true;
+        private bool _captureDestructionPhotosEnabled = true;
         private bool _sharePhotosOptIn;
         private bool _photoMetricsRefreshQueued;
         private bool _photoMetricsDirtyAfterRender;
+        private bool _refreshPhotoMetricsAfterSceneWrites;
         private Task<PhotoMetricsResult> _photoMetricsTask;
         private readonly SurveillancePhotoDiscoveryCache
             _photoDiscoveryCache = new SurveillancePhotoDiscoveryCache();
@@ -293,10 +317,20 @@ namespace FlockSurveillance
                 true
             );
 
+        private readonly NativeCheckboxItem _captureDestructionPhotosItem =
+            new NativeCheckboxItem(
+                "Camera Destruction Cam",
+                "Record the player and moving fallen Flock camera " +
+                SurveillanceCameraDestructionCaptureCoordinator.
+                    DefaultCaptureDelayFrames +
+                " frames after destruction for later rendering.",
+                true
+            );
+
         private readonly NativeItem _generatedPhotosItem =
             new NativeItem(
                 "Photos Generated",
-                "Number of JPG files in the Photos folder and its children.",
+                "Number of saved JPG files in the capture library.",
                 "0"
             );
 
@@ -312,6 +346,15 @@ namespace FlockSurveillance
                 "CCTV Filter",
                 "Apply the CCTV treatment to saved JPGs.",
                 true
+            );
+
+        private readonly NativeCheckboxItem _frustumEntityLoadingItem =
+            new NativeCheckboxItem(
+                "Frustum Entity Loading",
+                "When enabled, reconstruct only recorded entities inside " +
+                "the queued camera views. Disabled uses the full captured " +
+                "sphere. GTA map streaming is unchanged.",
+                false
             );
 
         private readonly NativeSliderItem _cctvStrengthItem =
@@ -388,8 +431,18 @@ namespace FlockSurveillance
             _saveManualCamerasItem.Activated +=
                 OnSaveManualCamerasActivated;
 
+            NativeItem clearWantedLevelItem =
+                new NativeItem(
+                    "Clear Wanted Level",
+                    "Remove the player's current wanted level."
+                );
+
+            clearWantedLevelItem.Activated +=
+                (sender, e) => ClearWantedLevel();
+
             _controlPanelMenu.Add(_placeManualCameraItem);
             _controlPanelMenu.Add(_respawnAllCamerasItem);
+            _controlPanelMenu.Add(clearWantedLevelItem);
             _controlPanelMenu.Add(_saveManualCamerasItem);
 
             _controlPanelMenu.Add(_showFovDebugItem);
@@ -421,8 +474,14 @@ namespace FlockSurveillance
             _capturePhotosItem.CheckboxChanged +=
                 OnCapturePhotosChanged;
 
+            _captureDestructionPhotosItem.CheckboxChanged +=
+                OnCaptureDestructionPhotosChanged;
+
             _cctvShaderItem.CheckboxChanged +=
                 OnCctvShaderChanged;
+
+            _frustumEntityLoadingItem.CheckboxChanged +=
+                OnFrustumEntityLoadingChanged;
 
             _cctvStrengthItem.ValueChanged +=
                 OnCctvStrengthChanged;
@@ -446,6 +505,7 @@ namespace FlockSurveillance
                 new NativeSeparatorItem("CAPTURE")
             );
             _photosMenu.Add(_capturePhotosItem);
+            _photosMenu.Add(_captureDestructionPhotosItem);
             _photosMenu.Add(_generatedPhotosItem);
             _photosMenu.Add(_queuedPhotosItem);
             _photosMenu.Add(_estimatedQueueTimeItem);
@@ -456,6 +516,7 @@ namespace FlockSurveillance
             );
             _photosMenu.Add(_cctvShaderItem);
             _photosMenu.Add(_cctvStrengthItem);
+            _photosMenu.Add(_frustumEntityLoadingItem);
 
             _photosMenu.Add(
                 new NativeSeparatorItem("SHARING")
@@ -474,8 +535,26 @@ namespace FlockSurveillance
 
             _controlPanelPool.Add(_photosMenu);
 
+            _learnMoreItem.Activated +=
+                (sender, e) =>
+                {
+                    _controlPanelPool.HideAll();
+                    _learnMorePopup.Open();
+                };
+
+            _learnMorePopup.Closed +=
+                (sender, e) =>
+                    _controlPanelMenu.Visible = true;
+
+            _controlPanelMenu.Add(_learnMoreItem);
+            _controlPanelMenu.Add(_creditsItem);
+            _controlPanelPool.Add(_learnMorePopup);
+
             _photoLab.CctvEffectEnabled =
                 _cctvShaderItem.Checked;
+
+            _photoLab.FrustumEntityLoadingEnabled =
+                _frustumEntityLoadingItem.Checked;
 
             UpdateCctvStrengthFromMenu();
 
@@ -497,6 +576,35 @@ namespace FlockSurveillance
         }
         private void OnTick(object sender, EventArgs e)
         {
+            _sceneRecorder.Tick();
+
+            if (
+                _refreshPhotoMetricsAfterSceneWrites &&
+                !_sceneRecorder.HasPendingSceneWrites
+            )
+            {
+                _refreshPhotoMetricsAfterSceneWrites = false;
+                RequestPhotoMetricsRefresh(true);
+            }
+
+            int recordedDestructionCaptures =
+                _cameraDestructionCapture.Tick(_sceneRecorder);
+
+            if (recordedDestructionCaptures > 0)
+            {
+                // Any discovery result created before this snapshot reaches
+                // disk is stale. Keep Start Render disabled until the writer
+                // finishes and a fresh background scan includes the scene.
+                _refreshPhotoMetricsAfterSceneWrites = true;
+                _photoMetricsRequestedGeneration++;
+                _photoMetricsRefreshQueued = false;
+                _readyPhotoBatch = null;
+                _photoDiscoveryReady = false;
+                _startRenderWhenDiscoveryReady = false;
+                _queuedRenderRequestTimestamp = 0L;
+                SetPhotoDiscoveryScanningState();
+            }
+
             if (_manualCameraPlacement.IsActive)
             {
                 UpdateManualCameraPlacement();
@@ -518,8 +626,6 @@ namespace FlockSurveillance
             {
                 RefreshStatsMenu();
             }
-
-            _sceneRecorder.Tick();
 
             bool photoLabWasBusy =
                 _photoLab.IsBusy;
@@ -683,25 +789,25 @@ namespace FlockSurveillance
                 return;
             }
 
-            if (e.KeyCode == Keys.F3)
-            {
-                TogglePhotoQueueRendering(
-                    SurveillancePhotoLabTelemetry.GetTimestamp(),
-                    true
-                );
-                return;
-            }
+            // if (e.KeyCode == Keys.F3)
+            // {
+            //     TogglePhotoQueueRendering(
+            //         SurveillancePhotoLabTelemetry.GetTimestamp(),
+            //         true
+            //     );
+            //     return;
+            // }
 
             if (_photoLab.IsBusy)
             {
                 return;
             }
 
-            if (e.KeyCode == Keys.F12)
-            {
-                ShowNearestActiveCameraDebug();
-                return;
-            }
+            // if (e.KeyCode == Keys.F12)
+            // {
+            //     ShowNearestActiveCameraDebug();
+            //     return;
+            // }
 
             if (e.KeyCode == Keys.F10)
             {
@@ -709,10 +815,10 @@ namespace FlockSurveillance
                 return;
             }
 
-            if (e.KeyCode == Keys.F6)
-            {
-                PlaceManualCamera();
-            }
+            // if (e.KeyCode == Keys.F6)
+            // {
+            //     PlaceManualCamera();
+            // }
         }
         private void DrawHeadingLine(Color color)
         {
@@ -949,6 +1055,7 @@ namespace FlockSurveillance
             ReleaseControlPanelPause();
             SaveStats();
             _photoLab.Dispose();
+            _cameraDestructionCapture.Clear();
             _sceneRecorder.Dispose();
             StopCameraAudio();
             DeleteCameraBlip();
@@ -2191,6 +2298,11 @@ namespace FlockSurveillance
                 ForceType.MaxForceRot2
             );
 
+            if (_captureDestructionPhotosEnabled)
+            {
+                _cameraDestructionCapture.Schedule(camera);
+            }
+
             // TrySpawnBirdFlock(camera.Position);
 
             SpawnCameraLoot(camera.Position);
@@ -2385,15 +2497,19 @@ namespace FlockSurveillance
                 drop.Prop.Delete();
                 _lootDrops.RemoveAt(i);
 
+                const int cameraSalvageValue = 600;
+
                 GTA.UI.Notification.Show(
-                    "~g~Collected camera components~s~\n" +
-                    "+3 Copper Scrap\n" +
-                    "+2 Electronic Components\n" +
-                    "+1 Gold-Plated Contact\n" +
-                    "~g~+$500"
+                    "~g~Collected Flock camera hardware~s~\n" +
+                    "+1 Open-Q 624A SOM\n" +
+                    "+1 RC7611 LTE Modem\n" +
+                    "+1 IMX477 Camera Assembly\n" +
+                    "+1 GNSS/RF Antenna Set\n" +
+                    "+1 205Wh Li-ion Battery\n" +
+                    $"~g~+${cameraSalvageValue:N0}"
                 );
 
-                Game.Player.Money += 500;
+                Game.Player.Money += cameraSalvageValue;
 
                 Function.Call(
                     Hash.PLAY_SOUND_FRONTEND,
@@ -3132,6 +3248,7 @@ namespace FlockSurveillance
             // deleting the currently streamed props.
             StopCameraAudio();
             ResetCameraDetectionState();
+            _cameraDestructionCapture.Clear();
 
             // This removes standing and fallen props, deletes their blips,
             // and clears _activeCameras.
@@ -3268,6 +3385,20 @@ namespace FlockSurveillance
                 _capturePhotosItem.Checked;
         }
 
+        private void OnCaptureDestructionPhotosChanged(
+            object sender,
+            EventArgs e
+        )
+        {
+            _captureDestructionPhotosEnabled =
+                _captureDestructionPhotosItem.Checked;
+
+            if (!_captureDestructionPhotosEnabled)
+            {
+                _cameraDestructionCapture.Clear();
+            }
+        }
+
         private void OnCctvShaderChanged(
             object sender,
             EventArgs e
@@ -3275,6 +3406,15 @@ namespace FlockSurveillance
         {
             _photoLab.CctvEffectEnabled =
                 _cctvShaderItem.Checked;
+        }
+
+        private void OnFrustumEntityLoadingChanged(
+            object sender,
+            EventArgs e
+        )
+        {
+            _photoLab.FrustumEntityLoadingEnabled =
+                _frustumEntityLoadingItem.Checked;
         }
 
         private void OnCctvStrengthChanged(
@@ -3316,6 +3456,15 @@ namespace FlockSurveillance
                 return;
             }
 
+            if (_cameraDestructionCapture.HasPendingCaptures)
+            {
+                GTA.UI.Notification.Show(
+                    "~y~Photo Lab~s~: Wait for the pending camera-" +
+                    "destruction capture to finish, then start rendering."
+                );
+                return;
+            }
+
             _controlPanelPool.HideAll();
             ReleaseControlPanelPause();
             TogglePhotoQueueRendering(requestedTimestamp, false);
@@ -3329,6 +3478,15 @@ namespace FlockSurveillance
             if (_photoLab.IsBusy)
             {
                 _photoLab.RequestCancel();
+                return;
+            }
+
+            if (_cameraDestructionCapture.HasPendingCaptures)
+            {
+                GTA.UI.Notification.Show(
+                    "~y~Photo Lab~s~: Wait for the pending camera-" +
+                    "destruction capture to finish, then start rendering."
+                );
                 return;
             }
 
@@ -3667,7 +3825,7 @@ namespace FlockSurveillance
                 result.PendingPhotoCount.ToString("N0");
 
             _photoInformationItem.Description =
-                "- Photos are stored at " +
+                "- Scene files and photos are stored at " +
                 _photoLab.PhotoDirectory +
                 "~n~- Render telemetry is stored at " +
                 _photoLab.TelemetryDirectory +

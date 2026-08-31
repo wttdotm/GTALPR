@@ -19,8 +19,8 @@ namespace FlockSurveillance
     /// <summary>
     /// Records detached, read-only descriptions of surveillance sightings.
     /// This class never changes GTA's camera, streaming, entities, time, or
-    /// weather. Tick(), TryRecordSighting(), and Dispose() must be called from
-    /// the parent SHVDN script thread.
+    /// weather. Tick(), TryRecordSighting(), TryRecordCameraDestruction(), and
+    /// Dispose() must be called from the parent SHVDN script thread.
     /// </summary>
     internal sealed class SurveillanceSceneRecorder : IDisposable
     {
@@ -47,6 +47,7 @@ namespace FlockSurveillance
         private long _nextSequence;
         private string _lastError;
         private string _lastSavedPath;
+        private int _outstandingWriteJobs;
         private bool _disposed;
 
         public SurveillanceSceneRecorder()
@@ -81,7 +82,10 @@ namespace FlockSurveillance
         public string LastSavedPath => Volatile.Read(ref _lastSavedPath);
 
         public int QueuedSceneCount =>
-            _writeQueue.Count + (_pendingBuilder == null ? 0 : 1);
+            (_pendingBuilder == null ? 0 : 1) +
+            Volatile.Read(ref _outstandingWriteJobs);
+
+        public bool HasPendingSceneWrites => QueuedSceneCount > 0;
 
         /// <summary>
         /// Finishes a scene after all same-frame camera sightings have had a
@@ -192,6 +196,132 @@ namespace FlockSurveillance
             {
                 RecordError(
                     "Could not record a surveillance scene.",
+                    exception
+                );
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Captures a delayed camera-destruction scene using an explicitly
+        /// planned render eye. Unlike a normal sighting, this view also makes
+        /// the moving/fallen Flock prop a required reconstruction entity.
+        /// </summary>
+        public bool TryRecordCameraDestruction(
+            SurveillanceCameraDestructionCapturePlan plan
+        )
+        {
+            if (_disposed || plan == null)
+            {
+                return false;
+            }
+
+            if (
+                !IsFinite(plan.EyePosition) ||
+                !IsFinite(plan.LookAtPosition) ||
+                !IsUsableEntity(plan.Player) ||
+                !IsUsableEntity(plan.Subject) ||
+                !IsUsableEntity(plan.DestroyedProp)
+            )
+            {
+                RecordError(
+                    "Ignored a destruction scene with invalid geometry or " +
+                    "missing required entities."
+                );
+                return false;
+            }
+
+            try
+            {
+                int frame = Game.FrameCount;
+
+                if (
+                    _pendingBuilder != null &&
+                    _pendingBuilder.Snapshot.GameFrame != frame
+                )
+                {
+                    FlushPendingScene();
+                }
+
+                if (_pendingBuilder == null)
+                {
+                    _pendingBuilder = CreateSnapshotBuilder(
+                        frame,
+                        plan.EyePosition,
+                        plan.Player
+                    );
+                }
+
+                string viewCameraId = BuildDestructionViewCameraId(
+                    plan.CameraId
+                );
+
+                if (HasCameraView(_pendingBuilder, viewCameraId))
+                {
+                    return true;
+                }
+
+                Stopwatch stopwatch = Stopwatch.StartNew();
+
+                MergeSceneEntities(
+                    _pendingBuilder,
+                    plan.EyePosition,
+                    plan.Player,
+                    plan.DestroyedProp
+                );
+
+                string destroyedPropId = _pendingBuilder.GetEntityId(
+                    plan.DestroyedProp.Handle
+                );
+                ScenePropDto destroyedPropSnapshot = FindCapturedProp(
+                    _pendingBuilder.Snapshot,
+                    destroyedPropId
+                );
+
+                if (destroyedPropSnapshot == null)
+                {
+                    RecordError(
+                        "Ignored a destruction scene because the fallen " +
+                        "Flock prop could not be captured."
+                    );
+                    return false;
+                }
+
+                if (
+                    destroyedPropSnapshot.Entity == null ||
+                    !destroyedPropSnapshot.Entity.IsVisible ||
+                    destroyedPropSnapshot.Entity.Opacity <= 0
+                )
+                {
+                    RecordError(
+                        "Ignored a destruction scene because the fallen " +
+                        "Flock prop was not visible on its delayed frame."
+                    );
+                    return false;
+                }
+
+                // Never substitute a later streamed/world prop for the exact
+                // frame-eight falling pose stored in this snapshot.
+                destroyedPropSnapshot.ReconstructionPolicy = "SpawnClone";
+
+                AddCameraDestructionView(
+                    _pendingBuilder,
+                    viewCameraId,
+                    plan,
+                    destroyedPropId
+                );
+
+                stopwatch.Stop();
+                _pendingBuilder.Snapshot.CaptureStats.CaptureMilliseconds +=
+                    stopwatch.Elapsed.TotalMilliseconds;
+
+                UpdateCompleteness(_pendingBuilder.Snapshot);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                RecordError(
+                    "Could not record a camera-destruction scene.",
                     exception
                 );
                 return false;
@@ -411,10 +541,211 @@ namespace FlockSurveillance
                 : cameraId.Trim();
         }
 
+        private static string BuildDestructionViewCameraId(string cameraId)
+        {
+            return NormalizeCameraId(cameraId) + "-destruction";
+        }
+
+        private void AddCameraDestructionView(
+            SnapshotBuilder builder,
+            string viewCameraId,
+            SurveillanceCameraDestructionCapturePlan plan,
+            string destroyedPropId
+        )
+        {
+            builder.Snapshot.MinimumReaderVersion = Math.Max(
+                builder.Snapshot.MinimumReaderVersion,
+                SurveillancePhotoLabManifestReader.
+                    CameraDestructionMinimumReaderVersion
+            );
+
+            bool targetIsVehicle = plan.Subject is Vehicle;
+            string targetPedId = builder.GetEntityId(plan.Player.Handle);
+            string targetVehicleId = targetIsVehicle
+                ? builder.GetEntityId(plan.Subject.Handle)
+                : null;
+            Vector3 sightline = plan.LookAtPosition - plan.EyePosition;
+            float heading = (float)(
+                Math.Atan2(sightline.X, sightline.Y) * 180d / Math.PI
+            );
+
+            if (heading < 0f)
+            {
+                heading += 360f;
+            }
+
+            SceneCameraViewDto view = new SceneCameraViewDto
+            {
+                CameraId = viewCameraId,
+                EyePosition = SceneVector3Dto.From(plan.EyePosition),
+                LookAtPosition = SceneVector3Dto.From(
+                    plan.LookAtPosition
+                ),
+                CameraHeading = heading,
+                PhotoFieldOfViewDegrees =
+                    DestructionCaptureGeometry.FieldOfViewDegrees,
+                SensingFieldOfViewDegrees = 0f,
+                SensingRangeMeters =
+                    DestructionCaptureGeometry.MaximumSubjectDistanceUnits,
+                OutputWidth = PhotoWidth,
+                OutputHeight = PhotoHeight,
+                AspectRatio = (float)PhotoWidth / PhotoHeight,
+                NearClipMeters = 0.1f,
+                FarClipMeters = PhotoFarClipMeters,
+                TargetPedId = targetPedId,
+                TargetVehicleId = targetVehicleId,
+                TargetSemantic = targetIsVehicle
+                    ? "PlayerVehicleCenter"
+                    : "PlayerPositionFallback",
+                TargetPointSource = targetIsVehicle
+                    ? "CapturedVehicleModelCenter"
+                    : "CapturedPedModelCenter",
+                UnavailableFields = new List<string>(),
+                CameraDestruction = new SceneCameraDestructionViewDto
+                {
+                    DestroyedPropId = destroyedPropId,
+                    PhysicalCameraPosition = SceneVector3Dto.From(
+                        plan.PhysicalCameraPosition
+                    ),
+                    DestructionFrame = plan.DestructionFrame,
+                    CaptureFrame = plan.CaptureFrame,
+                    RequestedDelayFrames = plan.RequestedDelayFrames,
+                    ActualDelayFrames = plan.ActualDelayFrames,
+                    SubjectKind = plan.SubjectKind,
+                    SubjectPosition = SceneVector3Dto.From(
+                        plan.SubjectCenter
+                    ),
+                    SubjectDistance = SceneNumber.Finite(
+                        plan.SubjectDistance
+                    ),
+                    RenderEyeDistance = SceneNumber.Finite(
+                        plan.RenderEyeDistance
+                    ),
+                    CandidateEyeA = SceneVector3Dto.From(
+                        plan.CandidateEyeA
+                    ),
+                    CandidateEyeB = SceneVector3Dto.From(
+                        plan.CandidateEyeB
+                    ),
+                    CandidateLineOfSightA = ToLineOfSightDto(
+                        plan.CandidateScoreA
+                    ),
+                    CandidateLineOfSightB = ToLineOfSightDto(
+                        plan.CandidateScoreB
+                    ),
+                    ChosenCandidate = plan.ChosenCandidate,
+                    CameraLiftUnits =
+                        DestructionCaptureGeometry.CameraLiftUnits,
+                    FramingMargin =
+                        DestructionCaptureGeometry.FramingMargin
+                }
+            };
+
+            PopulateViewLocation(
+                view,
+                plan.PhysicalCameraPosition
+            );
+            builder.Snapshot.Views.Add(view);
+        }
+
+        private static SceneLineOfSightScoreDto ToLineOfSightDto(
+            DestructionCaptureLineOfSightScore score
+        )
+        {
+            if (score == null)
+            {
+                return new SceneLineOfSightScoreDto();
+            }
+
+            return new SceneLineOfSightScoreDto
+            {
+                ClearEndpointCount = score.ClearEndpointCount,
+                MinimumVisibleFraction = SceneNumber.Finite(
+                    score.MinimumVisibleFraction
+                ),
+                TotalVisibleFraction = SceneNumber.Finite(
+                    score.TotalVisibleFraction
+                )
+            };
+        }
+
+        private static void PopulateViewLocation(
+            SceneCameraViewDto view,
+            Vector3 physicalCameraPosition
+        )
+        {
+            try
+            {
+                view.InteriorId = Function.Call<int>(
+                    Hash.GET_INTERIOR_AT_COORDS,
+                    physicalCameraPosition.X,
+                    physicalCameraPosition.Y,
+                    physicalCameraPosition.Z
+                );
+            }
+            catch
+            {
+                view.UnavailableFields.Add("InteriorId");
+            }
+
+            try
+            {
+                view.StreetName = World.GetStreetName(
+                    physicalCameraPosition
+                );
+            }
+            catch
+            {
+                view.UnavailableFields.Add("StreetName");
+            }
+
+            try
+            {
+                view.ZoneDisplayName = World.GetZoneDisplayName(
+                    physicalCameraPosition
+                );
+                view.ZoneLocalizedName = World.GetZoneLocalizedName(
+                    physicalCameraPosition
+                );
+            }
+            catch
+            {
+                view.UnavailableFields.Add("ZoneDisplayName");
+                view.UnavailableFields.Add("ZoneLocalizedName");
+            }
+        }
+
+        private static ScenePropDto FindCapturedProp(
+            SceneSnapshotDto snapshot,
+            string entityId
+        )
+        {
+            if (snapshot?.Props == null ||
+                string.IsNullOrWhiteSpace(entityId))
+            {
+                return null;
+            }
+
+            foreach (ScenePropDto prop in snapshot.Props)
+            {
+                if (string.Equals(
+                    prop?.Entity?.EntityId,
+                    entityId,
+                    StringComparison.OrdinalIgnoreCase
+                ))
+                {
+                    return prop;
+                }
+            }
+
+            return null;
+        }
+
         private void MergeSceneEntities(
             SnapshotBuilder builder,
             Vector3 cameraEyePosition,
-            Ped player
+            Ped player,
+            Prop requiredProp = null
         )
         {
             List<Vehicle> vehicles = new List<Vehicle>();
@@ -427,6 +758,14 @@ namespace FlockSurveillance
             Dictionary<int, PropCandidate> propByHandle =
                 new Dictionary<int, PropCandidate>();
             HashSet<int> projectileHandles = new HashSet<int>();
+
+            AddPropCandidate(
+                propByHandle,
+                requiredProp,
+                false,
+                true,
+                builder
+            );
 
             AddPedCandidate(
                 peds,
@@ -677,6 +1016,7 @@ namespace FlockSurveillance
                         propByHandle,
                         pickup,
                         true,
+                        false,
                         builder
                     );
                 }
@@ -712,6 +1052,7 @@ namespace FlockSurveillance
                     AddPropCandidate(
                         propByHandle,
                         prop,
+                        false,
                         false,
                         builder
                     );
@@ -854,6 +1195,7 @@ namespace FlockSurveillance
             Dictionary<int, PropCandidate> propByHandle,
             Prop prop,
             bool isPickup,
+            bool required,
             SnapshotBuilder builder
         )
         {
@@ -869,7 +1211,7 @@ namespace FlockSurveillance
                 return;
             }
 
-            if (propByHandle.Count >= MaximumProps)
+            if (!required && propByHandle.Count >= MaximumProps)
             {
                 builder.Snapshot.CaptureStats.PropLimitHit = true;
                 return;
@@ -2195,13 +2537,8 @@ namespace FlockSurveillance
             string fileName =
                 builder.Snapshot.SnapshotId + "_" +
                 SanitizeFileNamePart(firstCameraId) + ".json.gz";
-            string dateDirectory = builder.Snapshot.CapturedAtUtc.Substring(
-                0,
-                10
-            );
             string outputPath = Path.Combine(
                 _outputDirectory,
-                dateDirectory,
                 fileName
             );
 
@@ -2210,8 +2547,14 @@ namespace FlockSurveillance
                 outputPath
             );
 
+            // Count the job before exposing it to the writer thread. This
+            // avoids a dequeue race where the queue is momentarily empty but
+            // the scene file has not finished writing yet.
+            Interlocked.Increment(ref _outstandingWriteJobs);
+
             if (!_writeQueue.TryAdd(job))
             {
+                Interlocked.Decrement(ref _outstandingWriteJobs);
                 RecordError(
                     "The scene writer queue is full; snapshot " +
                         builder.Snapshot.SnapshotId + " was dropped."
@@ -2281,6 +2624,10 @@ namespace FlockSurveillance
                             job.Snapshot.SnapshotId + ".",
                         exception
                     );
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _outstandingWriteJobs);
                 }
             }
         }
@@ -2480,8 +2827,20 @@ namespace FlockSurveillance
                     omissions,
                     "View " + view.CameraId + " TargetVehicleId",
                     view.TargetVehicleId,
-                    true
+                    !string.IsNullOrWhiteSpace(view.TargetVehicleId)
                 );
+
+                if (view.CameraDestruction != null)
+                {
+                    RequireReference(
+                        entityIds,
+                        omissions,
+                        "View " + view.CameraId +
+                            " CameraDestruction.DestroyedPropId",
+                        view.CameraDestruction.DestroyedPropId,
+                        true
+                    );
+                }
             }
 
             foreach (SceneVehicleDto vehicle in snapshot.Vehicles)
@@ -2647,6 +3006,31 @@ namespace FlockSurveillance
                 view.FarClipMeters = SceneNumber.Finite(
                     view.FarClipMeters
                 );
+
+                SceneCameraDestructionViewDto destruction =
+                    view.CameraDestruction;
+
+                if (destruction != null)
+                {
+                    destruction.SubjectDistance = SceneNumber.Finite(
+                        destruction.SubjectDistance
+                    );
+                    destruction.RenderEyeDistance = SceneNumber.Finite(
+                        destruction.RenderEyeDistance
+                    );
+                    destruction.CameraLiftUnits = SceneNumber.Finite(
+                        destruction.CameraLiftUnits
+                    );
+                    destruction.FramingMargin = SceneNumber.Finite(
+                        destruction.FramingMargin
+                    );
+                    SanitizeLineOfSight(
+                        destruction.CandidateLineOfSightA
+                    );
+                    SanitizeLineOfSight(
+                        destruction.CandidateLineOfSightB
+                    );
+                }
             }
 
             foreach (SceneVehicleDto vehicle in snapshot.Vehicles)
@@ -2681,29 +3065,28 @@ namespace FlockSurveillance
             }
         }
 
+        private static void SanitizeLineOfSight(
+            SceneLineOfSightScoreDto score
+        )
+        {
+            if (score == null)
+            {
+                return;
+            }
+
+            score.MinimumVisibleFraction = SceneNumber.Finite(
+                score.MinimumVisibleFraction
+            );
+            score.TotalVisibleFraction = SceneNumber.Finite(
+                score.TotalVisibleFraction
+            );
+        }
+
         private static string BuildDefaultOutputDirectory()
         {
-            string root = Environment.GetFolderPath(
-                Environment.SpecialFolder.MyPictures
-            );
-
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                root = Environment.GetFolderPath(
-                    Environment.SpecialFolder.MyDocuments
-                );
-            }
-
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                root = AppDomain.CurrentDomain.BaseDirectory;
-            }
-
-            return Path.Combine(
-                root,
-                "FlockSurveillance",
-                "Scenes"
-            );
+            return SurveillancePhotoStorageLayout
+                .CreateDefault()
+                .CaptureDirectory;
         }
 
         private static string GetShvdnVersion()
@@ -2911,6 +3294,35 @@ namespace FlockSurveillance
         public string ZoneDisplayName { get; set; }
         public string ZoneLocalizedName { get; set; }
         public List<string> UnavailableFields { get; set; }
+        public SceneCameraDestructionViewDto CameraDestruction { get; set; }
+    }
+
+    internal sealed class SceneCameraDestructionViewDto
+    {
+        public string DestroyedPropId { get; set; }
+        public SceneVector3Dto PhysicalCameraPosition { get; set; }
+        public int DestructionFrame { get; set; }
+        public int CaptureFrame { get; set; }
+        public int RequestedDelayFrames { get; set; }
+        public int ActualDelayFrames { get; set; }
+        public string SubjectKind { get; set; }
+        public SceneVector3Dto SubjectPosition { get; set; }
+        public float SubjectDistance { get; set; }
+        public float RenderEyeDistance { get; set; }
+        public SceneVector3Dto CandidateEyeA { get; set; }
+        public SceneVector3Dto CandidateEyeB { get; set; }
+        public SceneLineOfSightScoreDto CandidateLineOfSightA { get; set; }
+        public SceneLineOfSightScoreDto CandidateLineOfSightB { get; set; }
+        public int ChosenCandidate { get; set; }
+        public float CameraLiftUnits { get; set; }
+        public float FramingMargin { get; set; }
+    }
+
+    internal sealed class SceneLineOfSightScoreDto
+    {
+        public int ClearEndpointCount { get; set; }
+        public float MinimumVisibleFraction { get; set; }
+        public float TotalVisibleFraction { get; set; }
     }
 
     internal sealed class SceneWorldStateDto

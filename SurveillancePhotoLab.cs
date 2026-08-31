@@ -50,6 +50,8 @@ namespace FlockSurveillance
 
         private readonly string _sceneDirectory;
         private readonly string _photoDirectory;
+        private readonly string _legacyPhotoDirectory;
+        private readonly IReadOnlyList<string> _manifestDirectories;
         private readonly SurveillanceJpegCapture _jpegCapture =
             new SurveillanceJpegCapture();
         private readonly SurveillancePhotoLabTelemetry _telemetry;
@@ -58,6 +60,7 @@ namespace FlockSurveillance
         private DateTime _phaseStartedUtc;
         private int _phaseStartedFrame;
         private long _phaseStartedTimestamp;
+        private long _cancelInstructionsStartedTimestamp;
         private int _telemetryPhasePlanIndex = -1;
         private int _telemetryPhaseViewIndex = -1;
         private string _telemetryPhaseManifest;
@@ -112,15 +115,26 @@ namespace FlockSurveillance
         private bool _cctvEffectEnabled = true;
         private float _cctvEffectStrength =
             DefaultCctvEffectStrength;
+        private bool _frustumEntityLoadingEnabled;
+        private bool _activeFrustumEntityLoading;
         private string _terminalError;
         private bool _terminalCanceled;
         private int _returnCollisionReadyFrame = -1;
         private bool _disposed;
 
         public SurveillancePhotoLab()
+            : this(SurveillancePhotoStorageLayout.CreateDefault())
+        {
+        }
+
+        private SurveillancePhotoLab(
+            SurveillancePhotoStorageLayout layout
+        )
             : this(
-                BuildDefaultSceneDirectory(),
-                BuildDefaultPhotoDirectory()
+                layout?.ManifestDirectories,
+                layout?.CaptureDirectory,
+                layout?.LegacyPhotoDirectory,
+                layout?.LogDirectory
             )
         {
         }
@@ -129,12 +143,27 @@ namespace FlockSurveillance
             string sceneDirectory,
             string photoDirectory
         )
+            : this(
+                new[] { sceneDirectory },
+                photoDirectory,
+                null,
+                BuildTelemetryDirectory(photoDirectory)
+            )
         {
-            if (string.IsNullOrWhiteSpace(sceneDirectory))
+        }
+
+        private SurveillancePhotoLab(
+            IEnumerable<string> manifestDirectories,
+            string photoDirectory,
+            string legacyPhotoDirectory,
+            string telemetryDirectory
+        )
+        {
+            if (manifestDirectories == null)
             {
                 throw new ArgumentException(
-                    "A scene directory is required.",
-                    nameof(sceneDirectory)
+                    "At least one scene directory is required.",
+                    nameof(manifestDirectories)
                 );
             }
 
@@ -146,16 +175,55 @@ namespace FlockSurveillance
                 );
             }
 
-            _sceneDirectory = Path.GetFullPath(sceneDirectory);
+            List<string> normalizedManifestDirectories =
+                new List<string>();
+
+            foreach (string directory in manifestDirectories)
+            {
+                if (string.IsNullOrWhiteSpace(directory))
+                {
+                    continue;
+                }
+
+                string fullPath = Path.GetFullPath(directory);
+                bool duplicate = false;
+
+                foreach (string existing in normalizedManifestDirectories)
+                {
+                    if (string.Equals(
+                        existing,
+                        fullPath,
+                        StringComparison.OrdinalIgnoreCase
+                    ))
+                    {
+                        duplicate = true;
+                        break;
+                    }
+                }
+
+                if (!duplicate)
+                {
+                    normalizedManifestDirectories.Add(fullPath);
+                }
+            }
+
+            if (normalizedManifestDirectories.Count == 0)
+            {
+                throw new ArgumentException(
+                    "At least one scene directory is required.",
+                    nameof(manifestDirectories)
+                );
+            }
+
+            _manifestDirectories = normalizedManifestDirectories;
+            _sceneDirectory = normalizedManifestDirectories[0];
             _photoDirectory = Path.GetFullPath(photoDirectory);
-            string photoParent = Path.GetDirectoryName(_photoDirectory);
+            _legacyPhotoDirectory =
+                string.IsNullOrWhiteSpace(legacyPhotoDirectory)
+                    ? null
+                    : Path.GetFullPath(legacyPhotoDirectory);
             _telemetry = new SurveillancePhotoLabTelemetry(
-                Path.Combine(
-                    string.IsNullOrWhiteSpace(photoParent)
-                        ? _photoDirectory
-                        : photoParent,
-                    "Logs"
-                )
+                Path.GetFullPath(telemetryDirectory)
             );
             Status = "Photo Lab is idle.";
         }
@@ -212,6 +280,16 @@ namespace FlockSurveillance
             }
         }
 
+        /// <summary>
+        /// Selects the entity reconstruction strategy for the next run.
+        /// GTA's terrain/map streaming remains spherical in both modes.
+        /// </summary>
+        public bool FrustumEntityLoadingEnabled
+        {
+            get { return _frustumEntityLoadingEnabled; }
+            set { _frustumEntityLoadingEnabled = value; }
+        }
+
         public bool TryGetLibraryMetrics(
             out int generatedPhotoCount,
             out int pendingPhotoCount,
@@ -265,24 +343,34 @@ namespace FlockSurveillance
                     ref captureFolderBytes
                 );
 
-                AccumulateDirectoryMetrics(
-                    _sceneDirectory,
-                    false,
-                    countedFiles,
-                    ref generatedPhotoCount,
-                    ref captureFolderBytes
-                );
-
-                if (!Directory.Exists(_sceneDirectory))
+                if (!string.IsNullOrWhiteSpace(_legacyPhotoDirectory))
                 {
-                    return true;
+                    AccumulateDirectoryMetrics(
+                        _legacyPhotoDirectory,
+                        true,
+                        countedFiles,
+                        ref generatedPhotoCount,
+                        ref captureFolderBytes
+                    );
+                }
+
+                foreach (string manifestDirectory in _manifestDirectories)
+                {
+                    AccumulateDirectoryMetrics(
+                        manifestDirectory,
+                        false,
+                        countedFiles,
+                        ref generatedPhotoCount,
+                        ref captureFolderBytes
+                    );
                 }
 
                 string discoveryError;
 
                 SurveillancePhotoBatchPlan.TryDiscover(
-                    _sceneDirectory,
+                    _manifestDirectories,
                     _photoDirectory,
+                    _legacyPhotoDirectory,
                     cache,
                     out batch,
                     out discoveryError,
@@ -303,27 +391,7 @@ namespace FlockSurveillance
                     return true;
                 }
 
-                bool hasManifest = false;
-
-                foreach (
-                    string ignored
-                    in Directory.EnumerateFiles(
-                        _sceneDirectory,
-                        "*",
-                        SearchOption.AllDirectories
-                    )
-                )
-                {
-                    if (SurveillancePhotoLabManifestReader.IsManifestPath(
-                        ignored
-                    ))
-                    {
-                        hasManifest = true;
-                        break;
-                    }
-                }
-
-                if (!hasManifest)
+                if (!HasAnyManifest())
                 {
                     return true;
                 }
@@ -459,6 +527,36 @@ namespace FlockSurveillance
             }
         }
 
+        private bool HasAnyManifest()
+        {
+            foreach (string directory in _manifestDirectories)
+            {
+                if (!Directory.Exists(directory))
+                {
+                    continue;
+                }
+
+                foreach (
+                    string path
+                    in Directory.EnumerateFiles(
+                        directory,
+                        "*",
+                        SearchOption.AllDirectories
+                    )
+                )
+                {
+                    if (SurveillancePhotoLabManifestReader.IsManifestPath(
+                        path
+                    ))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>
         /// JPGs confirmed by the writer before this run ended. A capture that
         /// was still in flight during cancellation may finish afterward.
@@ -509,8 +607,9 @@ namespace FlockSurveillance
             SurveillancePhotoBatchPlan batch;
 
             if (!SurveillancePhotoBatchPlan.TryDiscover(
-                _sceneDirectory,
+                _manifestDirectories,
                 _photoDirectory,
+                _legacyPhotoDirectory,
                 out batch,
                 out error
             ))
@@ -564,6 +663,7 @@ namespace FlockSurveillance
             if (!SurveillancePhotoScenePlan.TryCreate(
                 manifestPath,
                 _photoDirectory,
+                _legacyPhotoDirectory,
                 out plan,
                 out error
             ))
@@ -613,21 +713,13 @@ namespace FlockSurveillance
 
             try
             {
-                ApplyModalFrameSuppression(
-                    _phase != PhotoLabPhase.ShowingCancelInstructions
-                );
+                ApplyModalFrameSuppression(true);
                 CaptureCancelShortcut();
                 PollPendingCaptureResult();
 
                 if (_cancelRequested && !IsCleaningUp())
                 {
-                    if (_phase ==
-                        PhotoLabPhase.ShowingCancelInstructions)
-                    {
-                        CompleteRun(null, true);
-                        return false;
-                    }
-                    else if (
+                    if (
                         _pendingCaptureId != 0L &&
                         !_encoderResultReceived
                     )
@@ -666,10 +758,6 @@ namespace FlockSurveillance
 
                 switch (_phase)
                 {
-                    case PhotoLabPhase.ShowingCancelInstructions:
-                        TickShowingCancelInstructions();
-                        break;
-
                     case PhotoLabPhase.FadingOutForSetup:
                         TickFadingOutForSetup();
                         break;
@@ -723,8 +811,7 @@ namespace FlockSurveillance
                         break;
                 }
 
-                if (_phase ==
-                    PhotoLabPhase.ShowingCancelInstructions)
+                if (ShouldDrawCancelInstructions())
                 {
                     DrawCancelInstructions();
                 }
@@ -886,6 +973,8 @@ namespace FlockSurveillance
                 _reconstructionWarningCount = 0;
                 _captureCriticalOmissionCount = 0;
                 _cancelRequested = false;
+                _activeFrustumEntityLoading =
+                    _frustumEntityLoadingEnabled;
                 _loadSceneOwned = false;
                 _focusOwned = false;
                 _focusAnchor = null;
@@ -926,7 +1015,11 @@ namespace FlockSurveillance
                     "~b~B~s~ to save progress and cancel.~n~Next " +
                     "render will pick up from where it left off."
                 );
-                SetPhase(PhotoLabPhase.ShowingCancelInstructions);
+                _cancelInstructionsStartedTimestamp =
+                    SurveillancePhotoLabTelemetry.GetTimestamp();
+                Screen.FadeOut(FadeMilliseconds);
+                Status = "Photo Lab is fading out for reconstruction.";
+                SetPhase(PhotoLabPhase.FadingOutForSetup);
                 return true;
             }
             catch (Exception exception)
@@ -1153,63 +1246,6 @@ namespace FlockSurveillance
             return true;
         }
 
-        private void TickShowingCancelInstructions()
-        {
-            if (PhaseElapsed() < CancelInstructionDuration)
-            {
-                return;
-            }
-
-            string error;
-
-            if (!CanStart(out error, true) ||
-                !ValidateQueuedSceneDistance(out error))
-            {
-                CompleteRun(
-                    "Photo Lab could not begin reconstruction: " + error,
-                    false
-                );
-                return;
-            }
-
-            // Refresh the snapshot after the instruction pause so gameplay
-            // returns to the state immediately before reconstruction began.
-            _savedState = PhotoLabSavedState.Capture();
-            Screen.FadeOut(FadeMilliseconds);
-            Status = "Photo Lab is fading out for reconstruction.";
-            SetPhase(PhotoLabPhase.FadingOutForSetup);
-        }
-
-        private bool ValidateQueuedSceneDistance(out string error)
-        {
-            error = null;
-
-            if (_plans == null)
-            {
-                error = "The queued Photo Lab scenes are unavailable.";
-                return false;
-            }
-
-            Vector3 livePosition = GetCurrentLiveAnchor().Position;
-
-            foreach (SurveillancePhotoScenePlan scene in _plans)
-            {
-                if (livePosition.DistanceTo(scene.Center) <
-                    scene.MinimumLiveDistance)
-                {
-                    error = string.Format(
-                        CultureInfo.InvariantCulture,
-                        "Move at least {0:0} meters away from the " +
-                        "recorded scenes and try again.",
-                        scene.MinimumLiveDistance
-                    );
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
         private void TickFadingOutForSetup()
         {
             if (!Screen.IsFadedOut)
@@ -1342,7 +1378,9 @@ namespace FlockSurveillance
             long reconstructionStarted =
                 SurveillancePhotoLabTelemetry.GetTimestamp();
             _reconstructor = new SurveillanceSceneReconstructor(
-                _plan.Scene
+                _plan.Scene,
+                _plan.Views.ConvertAll(viewPlan => viewPlan.View),
+                _activeFrustumEntityLoading
             );
             RecordTelemetryOperation(
                 "reconstructor_plan",
@@ -1356,6 +1394,70 @@ namespace FlockSurveillance
                     {
                         "planned_clones",
                         _reconstructor.PlannedCloneCount
+                    },
+                    {
+                        "entity_loading_mode",
+                        _reconstructor.FrustumFallbackToSphere
+                            ? "frustum_fallback_sphere"
+                            : _reconstructor.UsesFrustum
+                                ? "frustum"
+                                : "sphere"
+                    },
+                    {
+                        "source_entities",
+                        _reconstructor.SourceEntityCount
+                    },
+                    {
+                        "selected_entities",
+                        _reconstructor.SelectedEntityCount
+                    },
+                    {
+                        "excluded_entities",
+                        _reconstructor.ExcludedEntityCount
+                    },
+                    {
+                        "frustum_seeds",
+                        _reconstructor.FrustumSeedCount
+                    },
+                    {
+                        "required_targets",
+                        _reconstructor.RequiredTargetCount
+                    },
+                    {
+                        "dependency_additions",
+                        _reconstructor.DependencyAddedCount
+                    },
+                    {
+                        "source_vehicles",
+                        _reconstructor.SourceVehicleCount
+                    },
+                    {
+                        "selected_vehicles",
+                        _reconstructor.SelectedVehicleCount
+                    },
+                    {
+                        "source_peds",
+                        _reconstructor.SourcePedCount
+                    },
+                    {
+                        "selected_peds",
+                        _reconstructor.SelectedPedCount
+                    },
+                    {
+                        "source_props",
+                        _reconstructor.SourcePropCount
+                    },
+                    {
+                        "selected_props",
+                        _reconstructor.SelectedPropCount
+                    },
+                    {
+                        "source_projectiles",
+                        _reconstructor.SourceProjectileCount
+                    },
+                    {
+                        "selected_projectiles",
+                        _reconstructor.SelectedProjectileCount
                     }
                 }
             );
@@ -1401,18 +1503,44 @@ namespace FlockSurveillance
             SceneCameraViewDto view = viewPlan.View;
             Vector3 recordedEye = ToVector(view.EyePosition);
             Vector3 target = ToVector(view.LookAtPosition);
-            Vector3 eye = MoveRenderEyeTowardTarget(
-                recordedEye,
-                target,
-                view.NearClipMeters
-            );
-            float fieldOfView = CalculateRenderFieldOfView(
-                view.PhotoFieldOfViewDegrees,
-                recordedEye,
-                eye,
-                target,
-                !string.IsNullOrWhiteSpace(view.TargetVehicleId)
-            );
+            bool exactGeometry = view.CameraDestruction != null;
+            Vector3 eye = exactGeometry
+                ? recordedEye
+                : MoveRenderEyeTowardTarget(
+                    recordedEye,
+                    target,
+                    view.NearClipMeters
+                );
+            float fieldOfView = exactGeometry
+                ? view.PhotoFieldOfViewDegrees
+                : CalculateRenderFieldOfView(
+                    view.PhotoFieldOfViewDegrees,
+                    recordedEye,
+                    eye,
+                    target,
+                    !string.IsNullOrWhiteSpace(view.TargetVehicleId)
+                );
+
+            bool requiredDestructionPropSpawned = false;
+
+            if (view.CameraDestruction != null)
+            {
+                Entity requiredDestructionProp;
+
+                if (!_reconstructor.TryGetSpawnedEntity(
+                    view.CameraDestruction.DestroyedPropId,
+                    out requiredDestructionProp
+                ))
+                {
+                    throw new InvalidOperationException(
+                        "The fallen Flock camera could not be recreated, " +
+                        "so Photo Lab will not save a destruction photo " +
+                        "without it."
+                    );
+                }
+
+                requiredDestructionPropSpawned = true;
+            }
 
             Entity focusAnchor;
 
@@ -1492,7 +1620,14 @@ namespace FlockSurveillance
             _telemetryViewStartedTimestamp = operationStarted;
             RecordTelemetryOperation(
                 "camera_setup",
-                operationStarted
+                operationStarted,
+                BuildCameraSetupTelemetry(
+                    view,
+                    recordedEye,
+                    eye,
+                    fieldOfView,
+                    requiredDestructionPropSpawned
+                )
             );
             SetPhase(PhotoLabPhase.WarmingViewWhileBlack);
         }
@@ -1511,6 +1646,9 @@ namespace FlockSurveillance
 
             _showNextCaptureLoadingPrompt = false;
             StopOwnedLoadingPrompt();
+            // Never let the startup instructions survive into a visible
+            // camera frame, where the screen grab could capture them.
+            _cancelInstructionsStartedTimestamp = 0L;
             PlayCaptureShutterSound();
             Screen.FadeIn(FadeMilliseconds);
             Status = "Photo Lab is revealing the reconstructed view.";
@@ -1548,17 +1686,20 @@ namespace FlockSurveillance
             SurveillancePhotoViewPlan viewPlan =
                 _plan.Views[_viewIndex];
             string error;
+            string existingOutputPath;
 
             // The queue is a snapshot. A previous run or another process may
             // finish this JPG while a long batch is still in progress.
-            if (File.Exists(viewPlan.OutputPath))
+            if (viewPlan.TryGetExistingOutputPath(
+                out existingOutputPath
+            ))
             {
                 _encoderResultReceived = true;
                 _encoderResultCredited = false;
                 _pendingCaptureId = 0L;
                 _encoderSucceeded = true;
                 _encoderCreatedNewFile = false;
-                _encoderOutputPath = viewPlan.OutputPath;
+                _encoderOutputPath = existingOutputPath;
                 _encoderError = null;
                 _encoderTiming = null;
                 CreditCurrentEncoderResult();
@@ -2610,6 +2751,29 @@ namespace FlockSurveillance
             );
         }
 
+        private bool ShouldDrawCancelInstructions()
+        {
+            if (
+                _cancelInstructionsStartedTimestamp <= 0L ||
+                IsCleaningUp()
+            )
+            {
+                return false;
+            }
+
+            bool visible =
+                SurveillancePhotoLabTelemetry.ElapsedMilliseconds(
+                    _cancelInstructionsStartedTimestamp
+                ) < CancelInstructionDuration.TotalMilliseconds;
+
+            if (!visible)
+            {
+                _cancelInstructionsStartedTimestamp = 0L;
+            }
+
+            return visible;
+        }
+
         private void ShowOwnedLoadingPrompt()
         {
             if (_loadingPromptOwned)
@@ -2894,7 +3058,13 @@ namespace FlockSurveillance
                     },
                     { "nearby_scenes_skipped", _nearbyManifestsSkippedThisRun },
                     { "cctv_enabled", _cctvEffectEnabled },
-                    { "cctv_strength", _cctvEffectStrength }
+                    { "cctv_strength", _cctvEffectStrength },
+                    {
+                        "entity_loading_mode",
+                        _activeFrustumEntityLoading
+                            ? "frustum"
+                            : "sphere"
+                    }
                 }
             );
         }
@@ -3024,6 +3194,121 @@ namespace FlockSurveillance
                 values["output"] = Path.GetFileName(
                     _plan.Views[_viewIndex].OutputPath
                 );
+
+                AddViewTelemetry(
+                    values,
+                    _plan.Views[_viewIndex].View
+                );
+            }
+
+            return values;
+        }
+
+        private static void AddViewTelemetry(
+            IDictionary<string, object> values,
+            SceneCameraViewDto view
+        )
+        {
+            if (values == null || view == null)
+            {
+                return;
+            }
+
+            values["camera_id"] = view.CameraId;
+            SceneCameraDestructionViewDto destruction =
+                view.CameraDestruction;
+            values["view_kind"] = destruction == null
+                ? "sighting"
+                : "camera_destruction";
+
+            if (destruction == null)
+            {
+                return;
+            }
+
+            values["exact_geometry"] = true;
+            values["required_prop_id"] = destruction.DestroyedPropId;
+            values["destruction_requested_delay_frames"] =
+                destruction.RequestedDelayFrames;
+            values["destruction_actual_delay_frames"] =
+                destruction.ActualDelayFrames;
+            values["destruction_subject_kind"] = destruction.SubjectKind;
+            values["destruction_subject_distance"] =
+                destruction.SubjectDistance;
+            values["destruction_render_eye_distance"] =
+                destruction.RenderEyeDistance;
+            values["destruction_chosen_candidate"] =
+                destruction.ChosenCandidate == 0 ? "A" : "B";
+
+            AddLineOfSightTelemetry(
+                values,
+                "destruction_candidate_a",
+                destruction.CandidateLineOfSightA
+            );
+            AddLineOfSightTelemetry(
+                values,
+                "destruction_candidate_b",
+                destruction.CandidateLineOfSightB
+            );
+        }
+
+        private static void AddLineOfSightTelemetry(
+            IDictionary<string, object> values,
+            string prefix,
+            SceneLineOfSightScoreDto score
+        )
+        {
+            if (score == null)
+            {
+                return;
+            }
+
+            values[prefix + "_clear_endpoints"] =
+                score.ClearEndpointCount;
+            values[prefix + "_minimum_visible_fraction"] =
+                score.MinimumVisibleFraction;
+            values[prefix + "_total_visible_fraction"] =
+                score.TotalVisibleFraction;
+        }
+
+        private static Dictionary<string, object>
+            BuildCameraSetupTelemetry(
+                SceneCameraViewDto view,
+                Vector3 recordedEye,
+                Vector3 renderEye,
+                float effectiveFieldOfView,
+                bool requiredDestructionPropSpawned
+            )
+        {
+            Dictionary<string, object> values =
+                new Dictionary<string, object>
+                {
+                    { "recorded_eye_x", recordedEye.X },
+                    { "recorded_eye_y", recordedEye.Y },
+                    { "recorded_eye_z", recordedEye.Z },
+                    { "render_eye_x", renderEye.X },
+                    { "render_eye_y", renderEye.Y },
+                    { "render_eye_z", renderEye.Z },
+                    {
+                        "base_field_of_view",
+                        view.PhotoFieldOfViewDegrees
+                    },
+                    {
+                        "effective_field_of_view",
+                        effectiveFieldOfView
+                    },
+                    {
+                        "exact_geometry",
+                        view.CameraDestruction != null
+                    }
+                };
+
+            if (view.CameraDestruction != null)
+            {
+                values["required_prop_id"] =
+                    view.CameraDestruction.DestroyedPropId;
+                values["required_prop_spawned"] =
+                    requiredDestructionPropSpawned;
             }
 
             return values;
@@ -3185,6 +3470,7 @@ namespace FlockSurveillance
             _reconstructor = null;
             _ownedCamera = null;
             _cancelRequested = false;
+            _activeFrustumEntityLoading = false;
             _loadSceneOwned = false;
             _focusOwned = false;
             _focusAnchor = null;
@@ -3203,6 +3489,7 @@ namespace FlockSurveillance
             _showNextCaptureLoadingPrompt = false;
             _loadingPromptOwned = false;
             _cancelKeyboardWasDown = false;
+            _cancelInstructionsStartedTimestamp = 0L;
             _reconstructionSkippedCount = 0;
             _reconstructionWarningCount = 0;
             _captureCriticalOmissionCount = 0;
@@ -3389,132 +3676,31 @@ namespace FlockSurveillance
                 : string.Join(", ", parts);
         }
 
-        private static string BuildDefaultSceneDirectory()
-        {
-            return Path.Combine(
-                GetPicturesDirectory(),
-                "FlockSurveillance",
-                "Scenes"
-            );
-        }
-
-        private static string BuildDefaultPhotoDirectory()
-        {
-            return Path.Combine(
-                GetPicturesDirectory(),
-                "FlockSurveillance",
-                "Photos"
-            );
-        }
-
-        private static string GetPicturesDirectory()
-        {
-            string pictures = Environment.GetFolderPath(
-                Environment.SpecialFolder.MyPictures
-            );
-            string documents = Environment.GetFolderPath(
-                Environment.SpecialFolder.MyDocuments
-            );
-            string fallback = !string.IsNullOrWhiteSpace(pictures)
-                ? pictures
-                : !string.IsNullOrWhiteSpace(documents)
-                    ? documents
-                    : AppDomain.CurrentDomain.BaseDirectory;
-            List<string> candidates = new List<string>();
-            AddUniqueDirectory(candidates, pictures);
-
-            foreach (string variable in new[]
-            {
-                "OneDrive",
-                "OneDriveConsumer",
-                "OneDriveCommercial"
-            })
-            {
-                string oneDrive = Environment.GetEnvironmentVariable(
-                    variable
-                );
-
-                if (!string.IsNullOrWhiteSpace(oneDrive))
-                {
-                    AddUniqueDirectory(
-                        candidates,
-                        Path.Combine(oneDrive, "Pictures")
-                    );
-                }
-            }
-
-            AddUniqueDirectory(candidates, documents);
-            AddUniqueDirectory(
-                candidates,
-                AppDomain.CurrentDomain.BaseDirectory
-            );
-
-            string newestRoot = null;
-            DateTime newestWrite = DateTime.MinValue;
-
-            foreach (string candidate in candidates)
-            {
-                string sceneDirectory = Path.Combine(
-                    candidate,
-                    "FlockSurveillance",
-                    "Scenes"
-                );
-
-                try
-                {
-                    if (!Directory.Exists(sceneDirectory))
-                    {
-                        continue;
-                    }
-
-                    DateTime write = Directory.GetLastWriteTimeUtc(
-                        sceneDirectory
-                    );
-
-                    if (newestRoot == null || write > newestWrite)
-                    {
-                        newestRoot = candidate;
-                        newestWrite = write;
-                    }
-                }
-                catch
-                {
-                    // Continue to the recorder-compatible fallback root.
-                }
-            }
-
-            return newestRoot ?? fallback;
-        }
-
-        private static void AddUniqueDirectory(
-            List<string> directories,
-            string directory
+        private static string BuildTelemetryDirectory(
+            string photoDirectory
         )
         {
-            if (string.IsNullOrWhiteSpace(directory))
+            if (string.IsNullOrWhiteSpace(photoDirectory))
             {
-                return;
+                throw new ArgumentException(
+                    "A photo directory is required.",
+                    nameof(photoDirectory)
+                );
             }
 
-            foreach (string existing in directories)
-            {
-                if (string.Equals(
-                    existing,
-                    directory,
-                    StringComparison.OrdinalIgnoreCase
-                ))
-                {
-                    return;
-                }
-            }
-
-            directories.Add(directory);
+            string fullPath = Path.GetFullPath(photoDirectory);
+            string parent = Path.GetDirectoryName(fullPath);
+            return Path.Combine(
+                string.IsNullOrWhiteSpace(parent)
+                    ? fullPath
+                    : parent,
+                "Logs"
+            );
         }
 
         private enum PhotoLabPhase
         {
             Idle,
-            ShowingCancelInstructions,
             FadingOutForSetup,
             LoadingRemoteScene,
             SettlingRemoteFocus,
