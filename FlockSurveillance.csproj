@@ -3,7 +3,7 @@
     <TargetFramework>net48</TargetFramework>
     <LangVersion>latest</LangVersion>
     <PlatformTarget>x64</PlatformTarget>
-    <AssemblyName>FlockSurveillance</AssemblyName>
+    <AssemblyName>GTALPR</AssemblyName>
     <RootNamespace>FlockSurveillance</RootNamespace>
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>

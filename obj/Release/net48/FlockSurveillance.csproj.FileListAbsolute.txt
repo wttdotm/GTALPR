@@ -1,0 +1,12 @@
+C:\Users\morri\rand_git\flock_gta\bin\Release\net48\GTALPR.dll
+C:\Users\morri\rand_git\flock_gta\bin\Release\net48\GTALPR.pdb
+C:\Users\morri\rand_git\flock_gta\bin\Release\net48\LemonUI.SHVDN3.dll
+C:\Users\morri\rand_git\flock_gta\obj\Release\net48\FlockSurveillance.csproj.AssemblyReference.cache
+C:\Users\morri\rand_git\flock_gta\obj\Release\net48\FlockSurveillance.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\morri\rand_git\flock_gta\obj\Release\net48\FlockSurveillance.AssemblyInfoInputs.cache
+C:\Users\morri\rand_git\flock_gta\obj\Release\net48\FlockSurveillance.AssemblyInfo.cs
+C:\Users\morri\rand_git\flock_gta\obj\Release\net48\FlockSurveillance.csproj.CoreCompileInputs.cache
+C:\Users\morri\rand_git\flock_gta\obj\Release\net48\FlockSurveillance.sourcelink.json
+C:\Users\morri\rand_git\flock_gta\obj\Release\net48\FlockSur.8C33F6AD.Up2Date
+C:\Users\morri\rand_git\flock_gta\obj\Release\net48\GTALPR.dll
+C:\Users\morri\rand_git\flock_gta\obj\Release\net48\GTALPR.pdb

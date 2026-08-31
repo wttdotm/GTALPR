@@ -8,7 +8,7 @@
       "version": "1.0.0",
       "restore": {
         "projectUniqueName": "C:\\Users\\morri\\rand_git\\flock_gta\\FlockSurveillance.csproj",
-        "projectName": "FlockSurveillance",
+        "projectName": "GTALPR",
         "projectPath": "C:\\Users\\morri\\rand_git\\flock_gta\\FlockSurveillance.csproj",
         "packagesPath": "C:\\Users\\morri\\.nuget\\packages\\",
         "outputPath": "C:\\Users\\morri\\rand_git\\flock_gta\\obj\\",
