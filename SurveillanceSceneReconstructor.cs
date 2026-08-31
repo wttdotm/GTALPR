@@ -19,7 +19,7 @@ namespace FlockSurveillance
         private static readonly TimeSpan ModelLoadTimeout =
             TimeSpan.FromSeconds(20);
 
-        private readonly SceneSnapshotDto _scene;
+        private readonly SurveillanceSceneEntitySelection _selection;
         private readonly Dictionary<int, ModelLoadEntry> _models =
             new Dictionary<int, ModelLoadEntry>();
 
@@ -63,8 +63,26 @@ namespace FlockSurveillance
         private int _skippedEntityCount;
 
         public SurveillanceSceneReconstructor(SceneSnapshotDto scene)
+            : this(scene, null, false)
         {
-            _scene = scene ?? throw new ArgumentNullException(nameof(scene));
+        }
+
+        public SurveillanceSceneReconstructor(
+            SceneSnapshotDto scene,
+            IEnumerable<SceneCameraViewDto> pendingViews,
+            bool useFrustum
+        )
+        {
+            if (scene == null)
+            {
+                throw new ArgumentNullException(nameof(scene));
+            }
+
+            _selection = SurveillanceSceneEntitySelection.Create(
+                scene,
+                pendingViews,
+                useFrustum
+            );
 
             IndexSceneEntities();
             BuildCloneAndModelPlan();
@@ -82,10 +100,55 @@ namespace FlockSurveillance
         public int PlannedModelCount => _models.Count;
 
         public int PlannedCloneCount =>
-            _scene.Vehicles.Count +
-            _scene.Peds.Count +
+            _selection.SelectedVehicleCount +
+            _selection.SelectedPedCount +
             _propsToClone.Count +
-            _scene.Projectiles.Count;
+            _selection.SelectedProjectileCount;
+
+        public bool UsesFrustum => _selection.UsesFrustum;
+
+        public bool FrustumFallbackToSphere =>
+            _selection.FrustumFallbackToSphere;
+
+        public int SourceEntityCount => _selection.SourceEntityCount;
+
+        public int SelectedEntityCount => _selection.SelectedEntityCount;
+
+        public int ExcludedEntityCount => _selection.ExcludedEntityCount;
+
+        public int FrustumSeedCount => _selection.FrustumSeedCount;
+
+        public int RequiredTargetCount => _selection.RequiredTargetCount;
+
+        public int DependencyAddedCount =>
+            _selection.DependencyAddedCount;
+
+        public int SourceVehicleCount => _selection.SourceVehicleCount;
+
+        public int SelectedVehicleCount => _selection.SelectedVehicleCount;
+
+        public int ExcludedVehicleCount => _selection.ExcludedVehicleCount;
+
+        public int SourcePedCount => _selection.SourcePedCount;
+
+        public int SelectedPedCount => _selection.SelectedPedCount;
+
+        public int ExcludedPedCount => _selection.ExcludedPedCount;
+
+        public int SourcePropCount => _selection.SourcePropCount;
+
+        public int SelectedPropCount => _selection.SelectedPropCount;
+
+        public int ExcludedPropCount => _selection.ExcludedPropCount;
+
+        public int SourceProjectileCount =>
+            _selection.SourceProjectileCount;
+
+        public int SelectedProjectileCount =>
+            _selection.SelectedProjectileCount;
+
+        public int ExcludedProjectileCount =>
+            _selection.ExcludedProjectileCount;
 
         public bool TryGetSpawnedEntity(
             string entityId,
@@ -223,10 +286,10 @@ namespace FlockSurveillance
                 switch (_spawnStage)
                 {
                     case SpawnStage.Vehicles:
-                        if (_vehicleIndex < _scene.Vehicles.Count)
+                        if (_vehicleIndex < _selection.Vehicles.Count)
                         {
                             TrySpawnVehicle(
-                                _scene.Vehicles[_vehicleIndex++]
+                                _selection.Vehicles[_vehicleIndex++]
                             );
                             remaining--;
                             break;
@@ -236,9 +299,9 @@ namespace FlockSurveillance
                         continue;
 
                     case SpawnStage.Peds:
-                        if (_pedIndex < _scene.Peds.Count)
+                        if (_pedIndex < _selection.Peds.Count)
                         {
-                            TrySpawnPed(_scene.Peds[_pedIndex++]);
+                            TrySpawnPed(_selection.Peds[_pedIndex++]);
                             remaining--;
                             break;
                         }
@@ -258,10 +321,13 @@ namespace FlockSurveillance
                         continue;
 
                     case SpawnStage.Projectiles:
-                        if (_projectileIndex < _scene.Projectiles.Count)
+                        if (
+                            _projectileIndex <
+                            _selection.Projectiles.Count
+                        )
                         {
                             TrySpawnProjectileVisual(
-                                _scene.Projectiles[_projectileIndex++]
+                                _selection.Projectiles[_projectileIndex++]
                             );
                             remaining--;
                             break;
@@ -336,22 +402,24 @@ namespace FlockSurveillance
 
         private void IndexSceneEntities()
         {
-            foreach (SceneVehicleDto vehicle in _scene.Vehicles)
+            foreach (SceneVehicleDto vehicle in _selection.Vehicles)
             {
                 IndexCommon(vehicle?.Entity);
             }
 
-            foreach (ScenePedDto ped in _scene.Peds)
+            foreach (ScenePedDto ped in _selection.Peds)
             {
                 IndexCommon(ped?.Entity);
             }
 
-            foreach (ScenePropDto prop in _scene.Props)
+            foreach (ScenePropDto prop in _selection.Props)
             {
                 IndexCommon(prop?.Entity);
             }
 
-            foreach (SceneProjectileDto projectile in _scene.Projectiles)
+            foreach (
+                SceneProjectileDto projectile in _selection.Projectiles
+            )
             {
                 IndexCommon(projectile?.Entity);
             }
@@ -370,17 +438,17 @@ namespace FlockSurveillance
 
         private void BuildCloneAndModelPlan()
         {
-            foreach (SceneVehicleDto vehicle in _scene.Vehicles)
+            foreach (SceneVehicleDto vehicle in _selection.Vehicles)
             {
                 AddModel(vehicle?.Entity);
             }
 
-            foreach (ScenePedDto ped in _scene.Peds)
+            foreach (ScenePedDto ped in _selection.Peds)
             {
                 AddModel(ped?.Entity);
             }
 
-            foreach (ScenePropDto prop in _scene.Props)
+            foreach (ScenePropDto prop in _selection.Props)
             {
                 Prop existing;
 
@@ -399,7 +467,9 @@ namespace FlockSurveillance
                 }
             }
 
-            foreach (SceneProjectileDto projectile in _scene.Projectiles)
+            foreach (
+                SceneProjectileDto projectile in _selection.Projectiles
+            )
             {
                 AddModel(projectile?.Entity);
             }
@@ -412,9 +482,9 @@ namespace FlockSurveillance
             int pedHeadroom = World.PedCapacity - World.PedCount;
             int propHeadroom = World.PropCapacity - World.PropCount;
             int requiredProps =
-                _propsToClone.Count + _scene.Projectiles.Count;
+                _propsToClone.Count + _selection.Projectiles.Count;
 
-            if (vehicleHeadroom < _scene.Vehicles.Count + 8)
+            if (vehicleHeadroom < _selection.Vehicles.Count + 8)
             {
                 throw new InvalidOperationException(
                     "There is not enough GTA vehicle-pool headroom to " +
@@ -422,7 +492,7 @@ namespace FlockSurveillance
                 );
             }
 
-            if (pedHeadroom < _scene.Peds.Count + 16)
+            if (pedHeadroom < _selection.Peds.Count + 16)
             {
                 throw new InvalidOperationException(
                     "There is not enough GTA ped-pool headroom to " +

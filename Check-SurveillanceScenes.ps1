@@ -3,9 +3,10 @@
 Checks every saved Flock surveillance scene manifest.
 
 .DESCRIPTION
-Auto-discovers the FlockSurveillance\Scenes directory under the Windows
-Pictures folder, including OneDrive redirection. Validates JSON structure,
-entity references, capture counters, completeness metadata, and performance.
+Auto-discovers the flat FlockSurveillance\Captures directory and the legacy
+FlockSurveillance\Scenes directory under the Windows Pictures folder,
+including OneDrive redirection. Validates JSON structure, entity references,
+capture counters, completeness metadata, and performance.
 
 .EXAMPLE
 .\Check-SurveillanceScenes.ps1
@@ -47,19 +48,21 @@ function Test-IsSceneManifestName {
 function Get-SceneManifestIdentity {
     param([string]$Path)
 
-    if ($Path.EndsWith(
+    $name = [IO.Path]::GetFileName($Path)
+
+    if ($name.EndsWith(
         ".json.gz",
         [StringComparison]::OrdinalIgnoreCase
     )) {
-        return $Path.Substring(0, $Path.Length - ".json.gz".Length)
+        return $name.Substring(0, $name.Length - ".json.gz".Length)
     }
 
-    return $Path.Substring(0, $Path.Length - ".json".Length)
+    return $name.Substring(0, $name.Length - ".json".Length)
 }
 
 function Get-SceneManifestFiles {
     param(
-        [string]$Directory,
+        [string[]]$Directories,
         [datetime]$ModifiedSince = [datetime]::MinValue,
         [switch]$IgnoreEnumerationErrors
     )
@@ -72,31 +75,53 @@ function Get-SceneManifestFiles {
         "Stop"
     }
 
-    Get-ChildItem `
-        -LiteralPath $Directory `
-        -Recurse `
-        -File `
-        -ErrorAction $enumerationErrorAction |
-        Where-Object {
-            $_.LastWriteTime -ge $ModifiedSince -and
-            (Test-IsSceneManifestName $_.Name)
-        } |
-        Sort-Object FullName |
-        ForEach-Object {
-            $identity = Get-SceneManifestIdentity $_.FullName
-            $existing = $selected[$identity]
-            $isGzip = $_.Name.EndsWith(
-                ".json.gz",
-                [StringComparison]::OrdinalIgnoreCase
-            )
+    for ($priority = 0; $priority -lt $Directories.Count; $priority++) {
+        $directory = $Directories[$priority]
 
-            if ($null -eq $existing -or $isGzip) {
-                $selected[$identity] = $_
-            }
+        if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+            continue
         }
+
+        Get-ChildItem `
+            -LiteralPath $directory `
+            -Filter "*.json*" `
+            -Recurse `
+            -File `
+            -ErrorAction $enumerationErrorAction |
+            Where-Object {
+                $_.LastWriteTime -ge $ModifiedSince -and
+                (Test-IsSceneManifestName $_.Name)
+            } |
+            Sort-Object FullName |
+            ForEach-Object {
+                $identity = Get-SceneManifestIdentity $_.FullName
+                $existing = $selected[$identity]
+                $isGzip = $_.Name.EndsWith(
+                    ".json.gz",
+                    [StringComparison]::OrdinalIgnoreCase
+                )
+                $replace =
+                    $null -eq $existing -or
+                    $priority -lt $existing.Priority -or
+                    (
+                        $priority -eq $existing.Priority -and
+                        $isGzip -and
+                        -not $existing.IsGzip
+                    )
+
+                if ($replace) {
+                    $selected[$identity] = [pscustomobject]@{
+                        File = $_
+                        Priority = $priority
+                        IsGzip = $isGzip
+                    }
+                }
+            }
+    }
 
     return @(
         $selected.Values |
+        ForEach-Object { $_.File } |
         Sort-Object LastWriteTime, FullName
     )
 }
@@ -181,7 +206,7 @@ function Read-SceneManifestText {
     }
 }
 
-function Add-CandidatePath {
+function Add-CandidateRoot {
     param(
         [System.Collections.ArrayList]$Candidates,
         [string]$PicturesPath
@@ -192,7 +217,7 @@ function Add-CandidatePath {
     }
 
     $expanded = [Environment]::ExpandEnvironmentVariables($PicturesPath)
-    $root = Join-Path $expanded "FlockSurveillance\Scenes"
+    $root = Join-Path $expanded "FlockSurveillance"
 
     foreach ($existing in $Candidates) {
         if ([string]::Equals(
@@ -207,7 +232,23 @@ function Add-CandidatePath {
     [void]$Candidates.Add($root)
 }
 
-function Resolve-ScenePath {
+function Get-ManifestDirectoriesForRoot {
+    param([string]$Root)
+
+    $directories = New-Object System.Collections.ArrayList
+
+    foreach ($leaf in @("Captures", "Scenes")) {
+        $path = Join-Path $Root $leaf
+
+        if (Test-Path -LiteralPath $path -PathType Container) {
+            [void]$directories.Add([IO.Path]::GetFullPath($path))
+        }
+    }
+
+    return @($directories)
+}
+
+function Resolve-ScenePaths {
     param([string]$RequestedPath)
 
     if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
@@ -217,13 +258,19 @@ function Resolve-ScenePath {
             throw "Scene directory does not exist: $resolved"
         }
 
-        return $resolved
+        $children = @(Get-ManifestDirectoriesForRoot $resolved)
+
+        if ($children.Count -gt 0) {
+            return $children
+        }
+
+        return @($resolved)
     }
 
     $candidates = New-Object System.Collections.ArrayList
 
     try {
-        Add-CandidatePath `
+        Add-CandidateRoot `
             -Candidates $candidates `
             -PicturesPath ([Environment]::GetFolderPath("MyPictures"))
     }
@@ -242,7 +289,7 @@ function Resolve-ScenePath {
             $property = $shellFolders.PSObject.Properties[$name]
 
             if ($null -ne $property) {
-                Add-CandidatePath `
+                Add-CandidateRoot `
                     -Candidates $candidates `
                     -PicturesPath ([string]$property.Value)
             }
@@ -253,41 +300,45 @@ function Resolve-ScenePath {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($env:OneDrive)) {
-        Add-CandidatePath `
+        Add-CandidateRoot `
             -Candidates $candidates `
             -PicturesPath (Join-Path $env:OneDrive "Pictures")
     }
 
     if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
-        Add-CandidatePath `
+        Add-CandidateRoot `
             -Candidates $candidates `
             -PicturesPath (Join-Path $env:USERPROFILE "Pictures")
 
-        Add-CandidatePath `
+        Add-CandidateRoot `
             -Candidates $candidates `
             -PicturesPath (Join-Path $env:USERPROFILE "OneDrive\Pictures")
     }
 
     foreach ($candidate in $candidates) {
+        $directories = @(Get-ManifestDirectoriesForRoot $candidate)
+
         if (
-            (Test-Path -LiteralPath $candidate -PathType Container) -and
+            $directories.Count -gt 0 -and
             $null -ne (Get-SceneManifestFiles `
-                -Directory $candidate `
+                -Directories $directories `
                 -IgnoreEnumerationErrors |
                 Select-Object -First 1)
         ) {
-            return $candidate
+            return $directories
         }
     }
 
     foreach ($candidate in $candidates) {
-        if (Test-Path -LiteralPath $candidate -PathType Container) {
-            return $candidate
+        $directories = @(Get-ManifestDirectoriesForRoot $candidate)
+
+        if ($directories.Count -gt 0) {
+            return $directories
         }
     }
 
     $searched = $candidates -join [Environment]::NewLine
-    throw "Could not find the Flock scene directory. Searched:`n$searched`nPass it explicitly with -ScenePath."
+    throw "Could not find the Flock capture directories. Searched:`n$searched`nPass one explicitly with -ScenePath."
 }
 
 function Add-Issue {
@@ -494,14 +545,36 @@ function Get-Percentile {
     return [double]$sorted[$index]
 }
 
-$root = Resolve-ScenePath $ScenePath
+function Get-ManifestDisplayName {
+    param(
+        [IO.FileInfo]$File,
+        [string[]]$Directories
+    )
+
+    foreach ($directory in $Directories) {
+        $prefix = $directory.TrimEnd("\") + "\"
+
+        if ($File.FullName.StartsWith(
+            $prefix,
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+            $leaf = Split-Path $directory -Leaf
+            $relative = $File.FullName.Substring($prefix.Length)
+            return Join-Path $leaf $relative
+        }
+    }
+
+    return $File.FullName
+}
+
+$roots = @(Resolve-ScenePaths $ScenePath)
 $files = @(
     Get-SceneManifestFiles `
-        -Directory $root `
+        -Directories $roots `
         -ModifiedSince $Since
 )
 
-Write-Host "Flock scene directory: $root"
+Write-Host "Flock manifest directories: $($roots -join '; ')"
 Write-Host "Scene manifests selected: $($files.Count)"
 
 if ($Since -ne [datetime]::MinValue) {
@@ -519,7 +592,7 @@ $snapshotIds = @{}
 $allCameraIds = @{}
 
 foreach ($file in $files) {
-    $relativeName = $file.FullName.Substring($root.Length).TrimStart("\")
+    $relativeName = Get-ManifestDisplayName $file $roots
     $fileIssues = New-Object System.Collections.ArrayList
     $scene = $null
 
@@ -567,6 +640,7 @@ foreach ($file in $files) {
     foreach ($requiredProperty in @(
         "Schema",
         "SchemaVersion",
+        "MinimumReaderVersion",
         "SnapshotId",
         "CapturedAtUtc",
         "Completeness",
@@ -608,6 +682,24 @@ foreach ($file in $files) {
             "Error" `
             $relativeName `
             "Unsupported schema version '$($scene.SchemaVersion)'."
+    }
+
+    if (-not (Test-IsJsonInteger $scene.MinimumReaderVersion)) {
+        Add-Issue `
+            $fileIssues `
+            "Error" `
+            $relativeName `
+            "MinimumReaderVersion must be a JSON integer."
+    }
+    elseif (
+        [int64]$scene.MinimumReaderVersion -lt 1 -or
+        [int64]$scene.MinimumReaderVersion -gt 2
+    ) {
+        Add-Issue `
+            $fileIssues `
+            "Error" `
+            $relativeName `
+            "Unsupported minimum reader version '$($scene.MinimumReaderVersion)'."
     }
 
     if ($null -eq $scene.World) {
@@ -692,6 +784,7 @@ foreach ($file in $files) {
     $allIds = @{}
     $vehicleIds = @{}
     $pedIds = @{}
+    $propIds = @{}
     $commonEntities = New-Object System.Collections.ArrayList
 
     foreach ($group in @(
@@ -741,6 +834,9 @@ foreach ($file in $files) {
                 }
                 elseif ($group.Name -eq "Ped") {
                     $pedIds[$entityId] = $true
+                }
+                elseif ($group.Name -eq "Prop") {
+                    $propIds[$entityId] = $true
                 }
             }
 
@@ -803,7 +899,10 @@ foreach ($file in $files) {
             $fileIssues `
             $relativeName
 
-        if ($view.TargetSemantic -ne "PlayerVehicleCenter") {
+        if (
+            $view.TargetSemantic -ne "PlayerVehicleCenter" -and
+            $view.TargetSemantic -ne "PlayerPositionFallback"
+        ) {
             Add-Issue `
                 $fileIssues `
                 "Warning" `
@@ -922,6 +1021,133 @@ foreach ($file in $files) {
                     "Error" `
                     $relativeName `
                     "Camera '$cameraId' AspectRatio does not match its dimensions."
+            }
+        }
+
+        $destruction = $view.CameraDestruction
+
+        if ($null -ne $destruction) {
+            if (
+                (Test-IsJsonInteger $scene.MinimumReaderVersion) -and
+                [int64]$scene.MinimumReaderVersion -lt 2
+            ) {
+                Add-Issue `
+                    $fileIssues `
+                    "Error" `
+                    $relativeName `
+                    "Camera '$cameraId' destruction metadata requires MinimumReaderVersion 2."
+            }
+
+            Test-Reference `
+                $propIds `
+                ([string]$destruction.DestroyedPropId) `
+                $true `
+                "Camera '$cameraId' CameraDestruction.DestroyedPropId" `
+                $fileIssues `
+                $relativeName
+
+            foreach ($vectorField in @(
+                "PhysicalCameraPosition",
+                "SubjectPosition",
+                "CandidateEyeA",
+                "CandidateEyeB"
+            )) {
+                [void](Test-SceneVector `
+                    $destruction.$vectorField `
+                    "Camera '$cameraId' CameraDestruction.$vectorField" `
+                    $fileIssues `
+                    $relativeName)
+            }
+
+            foreach ($numericField in @(
+                "SubjectDistance",
+                "RenderEyeDistance",
+                "CameraLiftUnits",
+                "FramingMargin"
+            )) {
+                if (-not (Test-IsJsonNumber $destruction.$numericField)) {
+                    Add-Issue `
+                        $fileIssues `
+                        "Error" `
+                        $relativeName `
+                        "Camera '$cameraId' CameraDestruction.$numericField must be a JSON number."
+                }
+            }
+
+            foreach ($integerField in @(
+                "DestructionFrame",
+                "CaptureFrame",
+                "RequestedDelayFrames",
+                "ActualDelayFrames",
+                "ChosenCandidate"
+            )) {
+                if (-not (Test-IsJsonInteger $destruction.$integerField)) {
+                    Add-Issue `
+                        $fileIssues `
+                        "Error" `
+                        $relativeName `
+                        "Camera '$cameraId' CameraDestruction.$integerField must be a JSON integer."
+                }
+            }
+
+            if (
+                (Test-IsJsonNumber $destruction.SubjectDistance) -and
+                (
+                    [double]$destruction.SubjectDistance -lt 0 -or
+                    [double]$destruction.SubjectDistance -gt 40
+                )
+            ) {
+                Add-Issue `
+                    $fileIssues `
+                    "Error" `
+                    $relativeName `
+                    "Camera '$cameraId' destruction subject distance must be between 0 and 40."
+            }
+
+            if (
+                (Test-IsJsonInteger $destruction.ActualDelayFrames) -and
+                (Test-IsJsonInteger $destruction.RequestedDelayFrames) -and
+                (
+                    [int64]$destruction.RequestedDelayFrames -lt 1 -or
+                    [int64]$destruction.RequestedDelayFrames -gt 600 -or
+                    [int64]$destruction.ActualDelayFrames -ne
+                        [int64]$destruction.RequestedDelayFrames
+                )
+            ) {
+                Add-Issue `
+                    $fileIssues `
+                    "Error" `
+                    $relativeName `
+                    "Camera '$cameraId' destruction delay must be exact and between 1 and 600 frames."
+            }
+
+            if (
+                (Test-IsJsonInteger $destruction.CaptureFrame) -and
+                (Test-IsJsonInteger $destruction.DestructionFrame) -and
+                (Test-IsJsonInteger $destruction.ActualDelayFrames) -and
+                (
+                    [int64]$destruction.CaptureFrame -
+                    [int64]$destruction.DestructionFrame
+                ) -ne [int64]$destruction.ActualDelayFrames
+            ) {
+                Add-Issue `
+                    $fileIssues `
+                    "Error" `
+                    $relativeName `
+                    "Camera '$cameraId' destruction frame delta does not match ActualDelayFrames."
+            }
+
+            if (
+                (Test-IsJsonInteger $destruction.CaptureFrame) -and
+                (Test-IsJsonInteger $scene.GameFrame) -and
+                [int64]$destruction.CaptureFrame -ne
+                    [int64]$scene.GameFrame
+            ) {
+                Add-Issue `
+                    $fileIssues `
+                    "Error" `
+                    $relativeName `
+                    "Camera '$cameraId' destruction CaptureFrame does not match the scene GameFrame."
             }
         }
     }

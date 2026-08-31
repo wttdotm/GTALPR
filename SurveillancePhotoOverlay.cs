@@ -64,8 +64,13 @@ namespace FlockSurveillance
                 return false;
             }
 
-            if (!IsFinite(view.EyePosition.X) ||
-                !IsFinite(view.EyePosition.Y))
+            SceneVector3Dto physicalCameraPosition =
+                view.CameraDestruction?.PhysicalCameraPosition ??
+                view.EyePosition;
+
+            if (physicalCameraPosition == null ||
+                !IsFinite(physicalCameraPosition.X) ||
+                !IsFinite(physicalCameraPosition.Y))
             {
                 error =
                     "The recorded camera coordinates are invalid.";
@@ -93,8 +98,8 @@ namespace FlockSurveillance
                 : "--:--:--";
 
             metadata = new SurveillancePhotoOverlayMetadata(
-                NormalizeCoordinate(view.EyePosition.X),
-                NormalizeCoordinate(view.EyePosition.Y),
+                NormalizeCoordinate(physicalCameraPosition.X),
+                NormalizeCoordinate(physicalCameraPosition.Y),
                 ResolveSuspectName(scene, view),
                 footerTimestamp,
                 recordingTime,
