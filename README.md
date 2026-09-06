@@ -10,6 +10,7 @@ A few other notable features:
 3. Players can choose to have the cameras take actual pictures of them while they play and then render and save them later. The pictures that the mod's Flock cameras take mimic Flock's own watermarking/overlays and support widescreen as well as 4:5 and 9:16 vertical formats for easy sharing on socials. Pictures can also be taken any time a player destroys a camera, letting them compile an album of destruction.
 4. The 3D model used for the camera in game is custom-built to mimic Flock's own cameras.
 5. There is built-in speedrun functionality, with a stats screen tracking number of cameras destroyed, and fastest time to destroy 10, 50, or all cameras.
+6. Players can place and save _their own cameras_ around the map, allowing them to set up photoshoots with surveillance (examples below)
 
 ## Installation
 You can download the latest version of the mod from the [releases page](https://github.com/wttdotm/gtalpr/releases). Instructions for installation are included in the description of the release, in the `INSTRUCTIONS.md` file in this repo, and  the `INSTRUCTIONS.md` file in the ZIP. All instructions are the same.
@@ -32,13 +33,29 @@ Most of the features of the mod are toggleable in settings. Here are some of the
 
 Some favorite images so far:
 
+_Camera capture of car escaping the cops:_
 ![Car escaping cops](assets/red_cops.jpg)
+
+_In-game view of a camera at sunset:_
 ![Rocket launcher pov](assets/rocket_launcher.png)
+
+_Image captured by the camera-destruction functionality:_
 ![Destruction camera example](assets/rocket_launcher_2.jpg)
+
+_Another image captured by camera-destruction:_
 ![Destruction camera car](assets/car_destruction.jpg)
+
+_The cameras trigger when the player is in any vehicle, including tanks..._
 ![Tankkkkkkk](assets/tank_chillin.jpg)
+
+_And planes!_
 ![Plane!!!!!!](assets/plane_sunset.jpg)
+
+_A photo taken by a player-placed camera:_
 ![Car flying](assets/pink_flying.jpg)
+
+_A photo taken by the camera at the Lighthouse Stunt Jump:_
+![Lighthouse stunt jump camera](assets/lighthouse_jump.jpg)
 
 
 ## Contributing / Modifying
