@@ -2,10 +2,10 @@
 
 ## Description: 
 
-Grant Theft Automated License Plate Reader is a GTA V mod that installs 235 Flock Automated License Plate Reader cameras (ALPRs) around the in-game map of Los Santos. This number is 1/10th the amount of Flock ALPRS currently tracked by DeFlock.org in LA County, which GTA V is heavily based on. As players drive through the map, they are subjected to seemingly inescapable surveillance, with pictures taken of them every time they enter a new camera's field of view. This makes the game much harder, as not only does police surveillance become nearly impossible to evade, but representing Flock's own history of inaccurate reporting, every time a player passes through a camera's field of view, the mod creates a 1 in 20 chance that the ALPR will trigger a police chase without any cause.
+Grant Theft Automated License Plate Reader is a GTA V mod that installs 235 Flock Automated License Plate Reader cameras (ALPRs) around the in-game map of Los Santos. This number is 1/10th the amount of Flock ALPRS currently tracked by [DeFlock.org](https://deflock.org) in LA County, which GTA V is heavily based on. As players drive through the map, they are subjected to seemingly inescapable surveillance, with pictures taken of them every time they enter a new camera's field of view. This makes the game much harder, as not only does police surveillance become nearly impossible to evade, but representing Flock's own history of inaccurate reporting, every time a player passes through a camera's field of view, the mod creates a 1 in 20 chance that the ALPR will trigger a police chase without any cause.
 
 A few other notable features:
-1. When destroyed, players can pick up the remnants of the camera for $600, the estimated market value of all components in a Flock camera based on a list created in a hardware teardown by _____.
+1. When destroyed, players can pick up the remnants of the camera for $600, the estimated market value of all components in a Flock camera based on a list created in a [hardware teardown by EyesOffCR](https://eyesoffcr.org/blog/blog-8.html).
 2. While Los Santos is a shrunken and fictionalized version of LA, there are many points across the two where their maps and camera placements are near one-to-one. Muscle Beach & Muscle Sands is a good example (see below).
 3. Players can choose to have the cameras take actual pictures of them while they play and then render and save them later. The pictures that the mod's Flock cameras take mimic Flock's own watermarking/overlays and support widescreen as well as 4:5 and 9:16 vertical formats for easy sharing on socials. Pictures can also be taken any time a player destroys a camera, letting them compile an album of destruction.
 4. The 3D model used for the camera in game is custom-built to mimic Flock's own cameras.
@@ -28,8 +28,25 @@ Most of the features of the mod are toggleable in settings. Here are some of the
 | CCTV Filter              | Two settings that affect whether a CCTV filter is applied to the photos and how strong it is                   | Photos    | On, 0.65       |                                                                                |           |         |
 
 
+## Gallery
+
+Some favorite images so far:
+
+![Car escaping cops](assets/red_cops.jpg)
+![Rocket launcher pov](assets/rocket_launcher.jpg)
+![Destruction camera example](assets/rocket_launcher_2.jpg)
+![Destruction camera car](assets/car_destruction.jpg)
+![Tankkkkkkk](assets/tank_chillin.jpg)
+![Plane!!!!!!](assets/plane_sunset.jpg)
+![Car flying](assets/pink_flying.jpg)
+
+
+## Contributing / Modifying
+As you can see, this repo is a bit of a mess. I'm a JS and Python guy, so I do not know C# and I developed most of it by iterating and tweaking funcionality with an LLM. Most of the important logic of the mod (camera loading and placement, camera FOV, reporting flow, etc) lives in `SurveillanceScript.cs`, so start there. Stats logic lives in `SurveillanceStats.cs`, and then most of the other files are pretty much all dedicated to the photo capture and rendering workflow.
+
 ## Special Thanks
 ...to Sean Kennedy [@aie_sean](https://instagram.com/aie_sean) for creating the 3d model of the Flock camera used in the mod.
+
 ...and to [Albert Sellars LLP](https://www.albertsellars.law/) for their pro bono legal assistance in the release of this mod.
 
 ## Disclaimer
@@ -40,12 +57,6 @@ The Flock logo in flock_logo_transparent.png is not subject to the license of GT
 ## Contact
 For any questions or inquiries, please contact me at wttdotm [at] gmail [dot] com.</p>
 
-## Contributing / Modifying
-As you can see, this repo is a bit of a mess. I'm a JS and Python guy, so I do not know C# and I developed most of it by iterating and tweaking funcionality with an LLM. Most of the important logic of the mod (camera loading and placement, camera FOV, reporting flow, etc) lives in `SurveillanceScript.cs`, so start there. Stats logic lives in `SurveillanceStats.cs`, and then most of the other files are pretty much all dedicated to the photo capture and rendering workflow.
-
-## Gallery
-
-Some favorite images so far
 
 --
 
