@@ -2,7 +2,7 @@
 
 ## Description: 
 
-Grant Theft Automated License Plate Reader is a GTA V mod that installs 235 Flock Automated License Plate Reader cameras (ALPRs) around the in-game map of Los Santos. This number is 1/10th the amount of Flock ALPRS currently tracked by [DeFlock.org](https://deflock.org) in LA County, which GTA V is heavily based on. As players drive through the map, they are subjected to seemingly inescapable surveillance, with pictures taken of them every time they enter a new camera's field of view. This makes the game much harder, as not only does police surveillance become nearly impossible to evade, but representing Flock's own history of inaccurate reporting, every time a player passes through a camera's field of view, the mod creates a 1 in 20 chance that the ALPR will trigger a police chase without any cause.
+Grand Theft Automated License Plate Reader is a GTA V mod that installs 235 Flock Automated License Plate Reader cameras (ALPRs) around the in-game map of Los Santos. This number is 1/10th the amount of Flock ALPRS currently tracked by [DeFlock.org](https://deflock.org) in LA County, which GTA V is heavily based on. As players drive through the map, they are subjected to seemingly inescapable surveillance, with pictures taken of them every time they enter a new camera's field of view. This makes the game much harder, as not only does police surveillance become nearly impossible to evade, but representing Flock's own history of inaccurate reporting, every time a player passes through a camera's field of view, the mod creates a 1 in 20 chance that the ALPR will trigger a police chase without any cause.
 
 A few other notable features:
 1. When destroyed, players can pick up the remnants of the camera for $600, the estimated market value of all components in a Flock camera based on a list created in a [hardware teardown by EyesOffCR](https://eyesoffcr.org/blog/blog-8.html).
@@ -19,9 +19,7 @@ _NOTE: All instructions are the same no matter where you read them. For those wi
 
 ## Gameplay
 
-## PLAYING WITH THE MOD
-
-On game startup, GTALPR should report that its camera definitions loaded.
+On game startup, GTALPR should report that its camera definitions loaded in a notification right above the minimap.
 
 ### Controls
 - Open/close the control panel: **F7** or **RB + D-pad Up** while stopped.
