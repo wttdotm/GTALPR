@@ -13,9 +13,24 @@ A few other notable features:
 6. Players can place and save _their own cameras_ around the map, allowing them to set up photoshoots with surveillance (examples below)
 
 ## Installation
-You can download the latest version of the mod from the [releases page](https://github.com/wttdotm/gtalpr/releases). Instructions for installation are included in the description of the release, in the `INSTRUCTIONS.md` file in this repo, and  the `INSTRUCTIONS.md` file in the ZIP. All instructions are the same.
+You can download the latest version of the mod from the [releases page](https://github.com/wttdotm/gtalpr/releases). Instructions for installation are included in the description of the release, in the `INSTRUCTIONS.md` file in this repo, and the `INSTRUCTIONS.md` file in the ZIP. 
 
-## Settings & Defaults
+_NOTE: All instructions are the same no matter where you read them. For those with OpenIV and GTA mods already installed, it is pretty drag-and-drop. If you don't know what those are and have never set up GTA mods before, the instructions also include steps for how to do that part too._ 
+
+## Gameplay
+
+## PLAYING WITH THE MOD
+
+On game startup, GTALPR should report that its camera definitions loaded.
+
+### Controls
+- Open/close the control panel: **F7** or **RB + D-pad Up** while stopped.
+- Place a camera manually with the control panel, you can also save the cameras you place so they'll persist between sessions.
+- Render and save the pictures the cameras have taken of you (and of you destroying cameras) in the PHOTOS section of the control panel.
+- See stats in the STATS section of the control panel.
+- Manually trigger a photo from all cameras whose FOV you are in by pressing **left shift** or **D-pad right** while in a vehicle.
+
+### Settings & Defaults
 Most of the features of the mod are toggleable in settings. Here are some of the most important ones and their default states:
 
 | Setting                  | Description                                                                                                    | Location  | Default        |
@@ -72,4 +87,4 @@ All trademarks are the property of their respective owners. GTALPR is in no way 
 The Flock logo in flock_logo_transparent.png is not subject to the license of GTALPR and is owned by Flock.
 
 ## Contact
-For any questions or inquiries, please contact me at wttdotm [at] gmail [dot] com.</p>
+For any questions or inquiries, please contact me at wttdotm [at] gmail [dot] com.
