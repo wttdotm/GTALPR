@@ -33,7 +33,7 @@ Most of the features of the mod are toggleable in settings. Here are some of the
 Some favorite images so far:
 
 ![Car escaping cops](assets/red_cops.jpg)
-![Rocket launcher pov](assets/rocket_launcher.jpg)
+![Rocket launcher pov](assets/rocket_launcher.png)
 ![Destruction camera example](assets/rocket_launcher_2.jpg)
 ![Destruction camera car](assets/car_destruction.jpg)
 ![Tankkkkkkk](assets/tank_chillin.jpg)
