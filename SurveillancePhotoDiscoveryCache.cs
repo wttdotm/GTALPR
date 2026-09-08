@@ -189,6 +189,7 @@ namespace FlockSurveillance
         public int CacheHitCount { get; set; }
         public int CacheMissCount { get; set; }
         public int CacheEvictionCount { get; set; }
+        public int FilenameMatchCount { get; set; }
         public long ManifestBytesRead { get; set; }
         public double ParseMilliseconds { get; set; }
         public double PlanningMilliseconds { get; set; }

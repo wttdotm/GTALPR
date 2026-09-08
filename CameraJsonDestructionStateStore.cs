@@ -38,7 +38,7 @@ namespace FlockSurveillance
 
             StatePath = Path.Combine(
                 root,
-                "FlockSurveillance",
+                "GTALPR_Surveillance",
                 "camera_destruction_states.json"
             );
         }

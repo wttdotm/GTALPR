@@ -120,6 +120,8 @@ namespace FlockSurveillance
             DefaultCctvEffectStrength;
         private bool _frustumEntityLoadingEnabled;
         private bool _activeFrustumEntityLoading;
+        private SurveillancePhotoOutputFormats _outputFormats =
+            SurveillancePhotoOutputFormats.Original;
         private string _terminalError;
         private bool _terminalCanceled;
         private int _returnCollisionReadyFrame = -1;
@@ -134,9 +136,11 @@ namespace FlockSurveillance
             SurveillancePhotoStorageLayout layout
         )
             : this(
-                layout?.ManifestDirectories,
+                layout == null
+                    ? null
+                    : new[] { layout.CaptureDirectory },
                 layout?.CaptureDirectory,
-                layout?.LegacyPhotoDirectory,
+                null,
                 layout?.LogDirectory
             )
         {
@@ -293,6 +297,26 @@ namespace FlockSurveillance
             set { _frustumEntityLoadingEnabled = value; }
         }
 
+        public SurveillancePhotoOutputFormats OutputFormats
+        {
+            get { return _outputFormats; }
+            set
+            {
+                SurveillancePhotoOutputFormats normalized =
+                    SurveillancePhotoOutputFormatSet.Normalize(value);
+
+                if (normalized == SurveillancePhotoOutputFormats.None)
+                {
+                    throw new ArgumentException(
+                        "Select at least one photo aspect ratio.",
+                        nameof(value)
+                    );
+                }
+
+                _outputFormats = normalized;
+            }
+        }
+
         public bool TryGetLibraryMetrics(
             out int generatedPhotoCount,
             out int pendingPhotoCount,
@@ -304,6 +328,7 @@ namespace FlockSurveillance
             SurveillancePhotoDiscoveryStatistics ignoredStatistics;
             return TryGetLibraryMetrics(
                 null,
+                _outputFormats,
                 out ignoredBatch,
                 out ignoredStatistics,
                 out generatedPhotoCount,
@@ -315,6 +340,7 @@ namespace FlockSurveillance
 
         internal bool TryGetLibraryMetrics(
             SurveillancePhotoDiscoveryCache cache,
+            SurveillancePhotoOutputFormats outputFormats,
             out SurveillancePhotoBatchPlan batch,
             out SurveillancePhotoDiscoveryStatistics discoveryStatistics,
             out int generatedPhotoCount,
@@ -346,34 +372,13 @@ namespace FlockSurveillance
                     ref captureFolderBytes
                 );
 
-                if (!string.IsNullOrWhiteSpace(_legacyPhotoDirectory))
-                {
-                    AccumulateDirectoryMetrics(
-                        _legacyPhotoDirectory,
-                        true,
-                        countedFiles,
-                        ref generatedPhotoCount,
-                        ref captureFolderBytes
-                    );
-                }
-
-                foreach (string manifestDirectory in _manifestDirectories)
-                {
-                    AccumulateDirectoryMetrics(
-                        manifestDirectory,
-                        false,
-                        countedFiles,
-                        ref generatedPhotoCount,
-                        ref captureFolderBytes
-                    );
-                }
-
                 string discoveryError;
 
                 SurveillancePhotoBatchPlan.TryDiscover(
                     _manifestDirectories,
                     _photoDirectory,
                     _legacyPhotoDirectory,
+                    outputFormats,
                     cache,
                     out batch,
                     out discoveryError,
@@ -442,6 +447,7 @@ namespace FlockSurveillance
                     { "cache_hits", measured.CacheHitCount },
                     { "cache_misses", measured.CacheMissCount },
                     { "cache_evictions", measured.CacheEvictionCount },
+                    { "filename_matches", measured.FilenameMatchCount },
                     { "manifest_bytes_read", measured.ManifestBytesRead },
                     { "parse_ms", measured.ParseMilliseconds },
                     { "planning_ms", measured.PlanningMilliseconds },
@@ -544,7 +550,7 @@ namespace FlockSurveillance
                     in Directory.EnumerateFiles(
                         directory,
                         "*",
-                        SearchOption.AllDirectories
+                        SearchOption.TopDirectoryOnly
                     )
                 )
                 {
@@ -608,13 +614,17 @@ namespace FlockSurveillance
             }
 
             SurveillancePhotoBatchPlan batch;
+            SurveillancePhotoDiscoveryStatistics ignoredStatistics;
 
             if (!SurveillancePhotoBatchPlan.TryDiscover(
                 _manifestDirectories,
                 _photoDirectory,
                 _legacyPhotoDirectory,
+                _outputFormats,
+                null,
                 out batch,
-                out error
+                out error,
+                out ignoredStatistics
             ))
             {
                 LastError = error;
@@ -662,13 +672,16 @@ namespace FlockSurveillance
             }
 
             SurveillancePhotoScenePlan plan;
+            SurveillancePhotoScenePlanResult ignoredResult;
 
             if (!SurveillancePhotoScenePlan.TryCreate(
                 manifestPath,
                 _photoDirectory,
                 _legacyPhotoDirectory,
+                _outputFormats,
                 out plan,
-                out error
+                out error,
+                out ignoredResult
             ))
             {
                 LastError = error;
@@ -1889,10 +1902,9 @@ namespace FlockSurveillance
             string existingOutputPath;
 
             // The queue is a snapshot. A previous run or another process may
-            // finish this JPG while a long batch is still in progress.
-            if (viewPlan.TryGetExistingOutputPath(
-                out existingOutputPath
-            ))
+            // finish any JPG while a batch is still in progress. One image
+            // marks the capture complete, regardless of aspect-ratio settings.
+            if (viewPlan.TryGetExistingOutputPath(out existingOutputPath))
             {
                 _encoderResultReceived = true;
                 _encoderResultCredited = false;
@@ -1911,6 +1923,9 @@ namespace FlockSurveillance
                 SetPhase(PhotoLabPhase.EncodingAndFadingOut);
                 return;
             }
+
+            List<SurveillancePhotoOutputPlan> missingOutputs =
+                viewPlan.GetMissingOutputs();
 
             SceneCameraDestructionViewDto destruction =
                 viewPlan.View.CameraDestruction;
@@ -1963,9 +1978,7 @@ namespace FlockSurveillance
             long captureStarted =
                 SurveillancePhotoLabTelemetry.GetTimestamp();
             bool captureBegan = _jpegCapture.TryBeginCapture(
-                viewPlan.OutputPath,
-                viewPlan.View.OutputWidth,
-                viewPlan.View.OutputHeight,
+                missingOutputs,
                 overlayMetadata,
                 out _pendingCaptureId,
                 out _encoderTiming,
@@ -3037,7 +3050,7 @@ namespace FlockSurveillance
                 );
                 Function.Call(
                     Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME,
-                    "Loading next Flock capture..."
+                    "Loading next capture"
                 );
                 Function.Call(Hash.END_TEXT_COMMAND_BUSYSPINNER_ON, 4);
                 _loadingPromptOwned = true;

@@ -274,6 +274,14 @@ namespace FlockSurveillance
                 !string.IsNullOrWhiteSpace(
                     item.CameraId
                 ) &&
+                !item.CameraId.StartsWith(
+                    "manual/f6-",
+                    StringComparison.Ordinal
+                ) &&
+                !item.CameraId.StartsWith(
+                    "manual/placed-",
+                    StringComparison.Ordinal
+                ) &&
                 !string.IsNullOrWhiteSpace(
                     item.SessionId
                 ) &&
@@ -475,7 +483,7 @@ namespace FlockSurveillance
 
             StatsPath = Path.Combine(
                 root,
-                "FlockSurveillance",
+                "GTALPR_Surveillance",
                 "stats.json"
             );
         }

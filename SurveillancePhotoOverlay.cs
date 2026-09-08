@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -280,6 +281,9 @@ namespace FlockSurveillance
         public const float GtalprLogoLeft = 32f;
         public const float GtalprLogoFooterGap = 20f;
 
+        public const float CornerShadowOffset = 3f;
+        public const int CornerShadowAlpha = 80;
+
         public const string FooterFontFamily = "Segoe UI Semibold";
         public const string TimeZoneLabel = "PDT";
         public const string UnavailableDateTimeText =
@@ -347,6 +351,19 @@ namespace FlockSurveillance
             SurveillancePhotoOverlayMetadata metadata
         )
         {
+            Apply(
+                output,
+                metadata,
+                SurveillancePhotoOutputFormats.Original
+            );
+        }
+
+        public void Apply(
+            Bitmap output,
+            SurveillancePhotoOverlayMetadata metadata,
+            SurveillancePhotoOutputFormats format
+        )
+        {
             if (output == null)
             {
                 throw new ArgumentNullException(nameof(output));
@@ -357,6 +374,15 @@ namespace FlockSurveillance
                 throw new ArgumentNullException(nameof(metadata));
             }
 
+            if (
+                format != SurveillancePhotoOutputFormats.Original &&
+                format != SurveillancePhotoOutputFormats.Vertical4x5 &&
+                format != SurveillancePhotoOutputFormats.Vertical9x16
+            )
+            {
+                throw new ArgumentOutOfRangeException(nameof(format));
+            }
+
             string error;
 
             if (!TryValidate(out error))
@@ -365,7 +391,27 @@ namespace FlockSurveillance
             }
 
             float scale = GetScale(output);
-            RectangleF footer = GetFooter(output, scale);
+            bool isPortrait =
+                format == SurveillancePhotoOutputFormats.Vertical4x5 ||
+                format == SurveillancePhotoOutputFormats.Vertical9x16;
+            bool isVertical9x16 =
+                format == SurveillancePhotoOutputFormats.Vertical9x16;
+            float cornerGraphicScale = isPortrait ? 2.5f : 1f;
+            float cornerPaddingScale = isPortrait ? 2f : 1f;
+            float recordingGraphicScale = isPortrait ? 3.75f : 1f;
+            float footerHeightScale = isPortrait ? 2f : 1f;
+            float footerTextScale = isPortrait ? 1.5f : 1f;
+
+            if (isVertical9x16)
+            {
+                footerTextScale *= 1.5f;
+            }
+
+            RectangleF footer = GetFooter(
+                output,
+                scale,
+                footerHeightScale
+            );
 
             using (Image flockLogo = LoadDetachedImage(_flockLogoBytes))
             using (Image gtalprLogo = LoadDetachedImage(
@@ -379,18 +425,24 @@ namespace FlockSurveillance
                         graphics,
                         output,
                         flockLogo,
-                        scale
+                        scale,
+                        cornerGraphicScale,
+                        cornerPaddingScale
                     );
                     DrawRecordingIndicator(
                         graphics,
                         metadata,
-                        scale
+                        scale,
+                        recordingGraphicScale,
+                        cornerPaddingScale
                     );
                     DrawGtalprLogo(
                         graphics,
                         footer,
                         gtalprLogo,
-                        scale
+                        scale,
+                        cornerGraphicScale,
+                        cornerPaddingScale
                     );
                 }
 
@@ -409,7 +461,14 @@ namespace FlockSurveillance
                 using (Graphics graphics = Graphics.FromImage(output))
                 {
                     ConfigureGraphics(graphics);
-                    DrawFooter(graphics, footer, metadata, scale);
+                    DrawFooter(
+                        graphics,
+                        footer,
+                        metadata,
+                        scale,
+                        footerTextScale,
+                        isVertical9x16
+                    );
                 }
             }
         }
@@ -427,10 +486,15 @@ namespace FlockSurveillance
                 System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
         }
 
-        private static RectangleF GetFooter(Bitmap output, float scale)
+        private static RectangleF GetFooter(
+            Bitmap output,
+            float scale,
+            float heightScale
+        )
         {
             float footerHeight =
-                SurveillancePhotoOverlayLayout.FooterHeight * scale;
+                SurveillancePhotoOverlayLayout.FooterHeight * scale *
+                heightScale;
             return new RectangleF(
                 0f,
                 output.Height - footerHeight,
@@ -443,7 +507,9 @@ namespace FlockSurveillance
             Graphics graphics,
             RectangleF footer,
             SurveillancePhotoOverlayMetadata metadata,
-            float scale
+            float scale,
+            float textScale,
+            bool useNarrowLeftText
         )
         {
             using (Brush footerBrush = new SolidBrush(
@@ -452,7 +518,8 @@ namespace FlockSurveillance
             using (Brush textBrush = new SolidBrush(Color.White))
             using (Font font = new Font(
                 SurveillancePhotoOverlayLayout.FooterFontFamily,
-                SurveillancePhotoOverlayLayout.FooterTextSize * scale,
+                SurveillancePhotoOverlayLayout.FooterTextSize * scale *
+                    textScale,
                 FontStyle.Regular,
                 GraphicsUnit.Pixel
             ))
@@ -464,14 +531,16 @@ namespace FlockSurveillance
                 float padding =
                     SurveillancePhotoOverlayLayout.FooterSidePadding *
                     scale;
-                string left = string.Format(
-                    CultureInfo.InvariantCulture,
-                    "Los Santos Police Department - Camera @ " +
-                    "{0:0.00}, {1:0.00} - Suspect: {2}",
-                    metadata.CameraX,
-                    metadata.CameraY,
-                    metadata.SuspectName
-                );
+                string left = useNarrowLeftText
+                    ? "Los Santos Police Department - Camera"
+                    : string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Los Santos Police Department - Camera @ " +
+                        "{0:0.00}, {1:0.00} - Suspect: {2}",
+                        metadata.CameraX,
+                        metadata.CameraY,
+                        metadata.SuspectName
+                    );
                 string right = metadata.FooterTimestamp;
                 SizeF rightSize = graphics.MeasureString(right, font);
                 float measuredTextPadding =
@@ -524,30 +593,45 @@ namespace FlockSurveillance
             Graphics graphics,
             Bitmap output,
             Image logo,
-            float scale
+            float scale,
+            float graphicScale,
+            float paddingScale
         )
         {
             float width =
-                SurveillancePhotoOverlayLayout.FlockLogoWidth * scale;
+                SurveillancePhotoOverlayLayout.FlockLogoWidth * scale *
+                graphicScale;
             float height = width * logo.Height / logo.Width;
             RectangleF destination = new RectangleF(
                 output.Width -
                     (SurveillancePhotoOverlayLayout.FlockLogoRight *
-                        scale) -
+                        scale * paddingScale) -
                     width,
-                SurveillancePhotoOverlayLayout.FlockLogoTop * scale,
+                SurveillancePhotoOverlayLayout.FlockLogoTop * scale *
+                    paddingScale,
                 width,
                 height
             );
-            graphics.DrawImage(logo, destination);
+            DrawImageWithShadow(
+                graphics,
+                logo,
+                destination,
+                scale * graphicScale
+            );
         }
 
         private static void DrawRecordingIndicator(
             Graphics graphics,
             SurveillancePhotoOverlayMetadata metadata,
-            float scale
+            float scale,
+            float graphicScale,
+            float paddingScale
         )
         {
+            using (Brush shadow = new SolidBrush(Color.FromArgb(
+                SurveillancePhotoOverlayLayout.CornerShadowAlpha,
+                Color.Black
+            )))
             using (Brush red = new SolidBrush(
                 SurveillancePhotoOverlayLayout.RecordingColor
             ))
@@ -558,76 +642,105 @@ namespace FlockSurveillance
                 {
                     // Drawing in reference-canvas units keeps every small
                     // bevel and inset proportional at non-1080p outputs.
-                    graphics.ScaleTransform(scale, scale);
-
-                    float left =
-                        SurveillancePhotoOverlayLayout.RecordingLeft;
-                    float top =
-                        SurveillancePhotoOverlayLayout.RecordingTop;
-                    float dot =
-                        SurveillancePhotoOverlayLayout.
-                            RecordingDotSize;
-
-                    graphics.FillEllipse(
-                        red,
-                        left,
-                        top + SurveillancePhotoOverlayLayout.
-                            RecordingDotTopOffset,
-                        dot,
-                        dot
+                    graphics.ScaleTransform(
+                        scale * graphicScale,
+                        scale * graphicScale
                     );
 
-                    float x = left + dot +
-                        SurveillancePhotoOverlayLayout.
-                            RecordingDotTextGap;
+                    float positionScale =
+                        paddingScale / graphicScale;
 
-                    foreach (char character in "REC")
-                    {
-                        DrawFourteenSegmentGlyph(
-                            graphics,
-                            red,
-                            character,
-                            x,
-                            top
-                        );
-                        x += SurveillancePhotoOverlayLayout.
-                            RecordingLetterAdvance;
-                    }
-
-                    x += SurveillancePhotoOverlayLayout.
-                        RecordingLetterTimeGap;
-
-                    foreach (char character in
-                        metadata.RecordingTime ?? "--:--:--")
-                    {
-                        if (character == ':')
-                        {
-                            DrawRecordingColon(
-                                graphics,
-                                red,
-                                x,
-                                top
-                            );
-                            x += SurveillancePhotoOverlayLayout.
-                                RecordingColonAdvance;
-                            continue;
-                        }
-
-                        DrawSevenSegmentGlyph(
-                            graphics,
-                            red,
-                            character,
-                            x,
-                            top
-                        );
-                        x += SurveillancePhotoOverlayLayout.
-                            RecordingDigitAdvance;
-                    }
+                    DrawRecordingIndicatorLayer(
+                        graphics,
+                        metadata,
+                        shadow,
+                        positionScale,
+                        SurveillancePhotoOverlayLayout.CornerShadowOffset
+                    );
+                    DrawRecordingIndicatorLayer(
+                        graphics,
+                        metadata,
+                        red,
+                        positionScale,
+                        0f
+                    );
                 }
                 finally
                 {
                     graphics.Restore(state);
                 }
+            }
+        }
+
+        private static void DrawRecordingIndicatorLayer(
+            Graphics graphics,
+            SurveillancePhotoOverlayMetadata metadata,
+            Brush brush,
+            float positionScale,
+            float offset
+        )
+        {
+            float left =
+                (SurveillancePhotoOverlayLayout.RecordingLeft *
+                    positionScale) + offset;
+            float top =
+                (SurveillancePhotoOverlayLayout.RecordingTop *
+                    positionScale) + offset;
+            float dot =
+                SurveillancePhotoOverlayLayout.RecordingDotSize;
+
+            graphics.FillEllipse(
+                brush,
+                left,
+                top + SurveillancePhotoOverlayLayout.
+                    RecordingDotTopOffset,
+                dot,
+                dot
+            );
+
+            float x = left + dot +
+                SurveillancePhotoOverlayLayout.RecordingDotTextGap;
+
+            foreach (char character in "REC")
+            {
+                DrawFourteenSegmentGlyph(
+                    graphics,
+                    brush,
+                    character,
+                    x,
+                    top
+                );
+                x += SurveillancePhotoOverlayLayout.
+                    RecordingLetterAdvance;
+            }
+
+            x += SurveillancePhotoOverlayLayout.RecordingLetterTimeGap;
+
+            foreach (char character in
+                metadata.RecordingTime ?? "--:--:--")
+            {
+                if (character == ':')
+                {
+                    DrawRecordingColon(
+                        graphics,
+                        brush,
+                        x,
+                        top
+                    );
+                    x += SurveillancePhotoOverlayLayout.
+                        RecordingColonAdvance;
+                    continue;
+                }
+
+                DrawSevenSegmentGlyph(
+                    graphics,
+                    brush,
+                    character,
+                    x,
+                    top
+                );
+                x += SurveillancePhotoOverlayLayout.
+                    RecordingDigitAdvance;
             }
         }
 
@@ -1197,22 +1310,74 @@ namespace FlockSurveillance
             Graphics graphics,
             RectangleF footer,
             Image logo,
-            float scale
+            float scale,
+            float graphicScale,
+            float paddingScale
         )
         {
             float width =
-                SurveillancePhotoOverlayLayout.GtalprLogoWidth * scale;
+                SurveillancePhotoOverlayLayout.GtalprLogoWidth * scale *
+                graphicScale;
             float height = width * logo.Height / logo.Width;
             RectangleF destination = new RectangleF(
-                SurveillancePhotoOverlayLayout.GtalprLogoLeft * scale,
+                SurveillancePhotoOverlayLayout.GtalprLogoLeft * scale *
+                    paddingScale,
                 footer.Top -
                     (SurveillancePhotoOverlayLayout.
-                        GtalprLogoFooterGap * scale) -
+                        GtalprLogoFooterGap * scale * paddingScale) -
                     height,
                 width,
                 height
             );
-            graphics.DrawImage(logo, destination);
+            DrawImageWithShadow(
+                graphics,
+                logo,
+                destination,
+                scale * graphicScale
+            );
+        }
+
+        private static void DrawImageWithShadow(
+            Graphics graphics,
+            Image image,
+            RectangleF destination,
+            float elementScale
+        )
+        {
+            float offset =
+                SurveillancePhotoOverlayLayout.CornerShadowOffset *
+                elementScale;
+            RectangleF shadowDestination = destination;
+            shadowDestination.Offset(offset, offset);
+            float alpha =
+                SurveillancePhotoOverlayLayout.CornerShadowAlpha / 255f;
+
+            using (ImageAttributes attributes = new ImageAttributes())
+            {
+                ColorMatrix shadowMatrix = new ColorMatrix(
+                    new[]
+                    {
+                        new[] { 0f, 0f, 0f, 0f, 0f },
+                        new[] { 0f, 0f, 0f, 0f, 0f },
+                        new[] { 0f, 0f, 0f, 0f, 0f },
+                        new[] { 0f, 0f, 0f, alpha, 0f },
+                        new[] { 0f, 0f, 0f, 0f, 1f }
+                    }
+                );
+                attributes.SetColorMatrix(shadowMatrix);
+                graphics.DrawImage(
+                    image,
+                    Rectangle.Round(shadowDestination),
+                    0,
+                    0,
+                    image.Width,
+                    image.Height,
+                    GraphicsUnit.Pixel,
+                    attributes
+                );
+            }
+
+            graphics.DrawImage(image, destination);
         }
 
         private static void ApplyCctvEffect(

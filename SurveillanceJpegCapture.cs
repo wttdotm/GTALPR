@@ -80,9 +80,7 @@ namespace FlockSurveillance
         /// ownership of the bitmap to the JPEG worker.
         /// </summary>
         public bool TryBeginCapture(
-            string outputPath,
-            int outputWidth,
-            int outputHeight,
+            IReadOnlyList<SurveillancePhotoOutputPlan> outputs,
             SurveillancePhotoOverlayMetadata overlayMetadata,
             out long captureId,
             out SurveillanceJpegCaptureTiming timing,
@@ -100,22 +98,39 @@ namespace FlockSurveillance
                 return false;
             }
 
-            if (
-                outputWidth < 64 ||
-                outputHeight < 64 ||
-                outputWidth > MaximumOutputDimension ||
-                outputHeight > MaximumOutputDimension ||
-                ((long)outputWidth * outputHeight) > MaximumOutputPixels
-            )
+            if (outputs == null || outputs.Count == 0)
             {
-                error = "The requested JPEG dimensions are not supported.";
+                error = "At least one JPEG output is required.";
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(outputPath))
+            foreach (SurveillancePhotoOutputPlan output in outputs)
             {
-                error = "A JPEG output path is required.";
-                return false;
+                if (output == null)
+                {
+                    error = "A JPEG output definition is missing.";
+                    return false;
+                }
+
+                if (
+                    output.OutputWidth < 64 ||
+                    output.OutputHeight < 64 ||
+                    output.OutputWidth > MaximumOutputDimension ||
+                    output.OutputHeight > MaximumOutputDimension ||
+                    ((long)output.OutputWidth * output.OutputHeight) >
+                        MaximumOutputPixels
+                )
+                {
+                    error =
+                        "The requested JPEG dimensions are not supported.";
+                    return false;
+                }
+
+                if (string.IsNullOrWhiteSpace(output.OutputPath))
+                {
+                    error = "A JPEG output path is required.";
+                    return false;
+                }
             }
 
             if (overlayMetadata == null)
@@ -214,9 +229,7 @@ namespace FlockSurveillance
                 CaptureJob job = new CaptureJob(
                     captureId,
                     bitmap,
-                    Path.GetFullPath(outputPath),
-                    outputWidth,
-                    outputHeight,
+                    new List<SurveillancePhotoOutputPlan>(outputs),
                     JpegQuality,
                     overlayMetadata,
                     timing
@@ -326,11 +339,26 @@ namespace FlockSurveillance
                 );
                 bool succeeded = false;
                 bool createdNewFile = false;
+                string resultOutputPath = job.Outputs[0].OutputPath;
                 string error = null;
 
                 try
                 {
-                    createdNewFile = WriteJpeg(job, timing);
+                    foreach (
+                        SurveillancePhotoOutputPlan output
+                        in job.Outputs
+                    )
+                    {
+                        bool created = WriteJpeg(job, output, timing);
+
+                        if (created && !createdNewFile)
+                        {
+                            resultOutputPath = output.OutputPath;
+                        }
+
+                        createdNewFile |= created;
+                    }
+
                     succeeded = true;
                 }
                 catch (Exception exception)
@@ -351,7 +379,7 @@ namespace FlockSurveillance
                     job.CaptureId,
                     succeeded,
                     createdNewFile,
-                    job.OutputPath,
+                    resultOutputPath,
                     timing,
                     error
                 );
@@ -363,10 +391,13 @@ namespace FlockSurveillance
 
         private bool WriteJpeg(
             CaptureJob job,
+            SurveillancePhotoOutputPlan outputPlan,
             SurveillanceJpegCaptureTiming timing
         )
         {
-            string directory = Path.GetDirectoryName(job.OutputPath);
+            string directory = Path.GetDirectoryName(
+                outputPlan.OutputPath
+            );
 
             if (string.IsNullOrWhiteSpace(directory))
             {
@@ -379,7 +410,7 @@ namespace FlockSurveillance
 
             string temporaryPath = Path.Combine(
                 directory,
-                "." + Path.GetFileName(job.OutputPath) + "." +
+                "." + Path.GetFileName(outputPlan.OutputPath) + "." +
                 Guid.NewGuid().ToString("N") + ".tmp"
             );
 
@@ -389,26 +420,27 @@ namespace FlockSurveillance
                 using (
                     Bitmap output = ResizeAndCrop(
                         job.Bitmap,
-                        job.OutputWidth,
-                        job.OutputHeight
+                        outputPlan.OutputWidth,
+                        outputPlan.OutputHeight
                     )
                 )
                 {
-                    timing.ResizeMilliseconds = ElapsedMilliseconds(
+                    timing.ResizeMilliseconds += ElapsedMilliseconds(
                         segmentStarted
                     );
                     segmentStarted = Stopwatch.GetTimestamp();
                     _overlayRenderer.Apply(
                         output,
-                        job.OverlayMetadata
+                        job.OverlayMetadata,
+                        outputPlan.Format
                     );
-                    timing.OverlayMilliseconds = ElapsedMilliseconds(
+                    timing.OverlayMilliseconds += ElapsedMilliseconds(
                         segmentStarted
                     );
 
                     segmentStarted = Stopwatch.GetTimestamp();
                     ImageCodecInfo codec = FindJpegCodec();
-                    timing.CodecLookupMilliseconds = ElapsedMilliseconds(
+                    timing.CodecLookupMilliseconds += ElapsedMilliseconds(
                         segmentStarted
                     );
 
@@ -429,16 +461,16 @@ namespace FlockSurveillance
 
                         segmentStarted = Stopwatch.GetTimestamp();
                         output.Save(temporaryPath, codec, parameters);
-                        timing.EncodeAndTemporaryWriteMilliseconds =
+                        timing.EncodeAndTemporaryWriteMilliseconds +=
                             ElapsedMilliseconds(segmentStarted);
                     }
                 }
 
                 long moveStarted = Stopwatch.GetTimestamp();
-                if (File.Exists(job.OutputPath))
+                if (File.Exists(outputPlan.OutputPath))
                 {
                     File.Delete(temporaryPath);
-                    timing.FinalMoveMilliseconds = ElapsedMilliseconds(
+                    timing.FinalMoveMilliseconds += ElapsedMilliseconds(
                         moveStarted
                     );
                     return false;
@@ -446,8 +478,8 @@ namespace FlockSurveillance
 
                 try
                 {
-                    File.Move(temporaryPath, job.OutputPath);
-                    timing.FinalMoveMilliseconds = ElapsedMilliseconds(
+                    File.Move(temporaryPath, outputPlan.OutputPath);
+                    timing.FinalMoveMilliseconds += ElapsedMilliseconds(
                         moveStarted
                     );
                     return true;
@@ -457,9 +489,9 @@ namespace FlockSurveillance
                     // Another process can win between File.Exists and the
                     // atomic move. Its completed destination still means this
                     // job respected the no-overwrite contract.
-                    if (File.Exists(job.OutputPath))
+                    if (File.Exists(outputPlan.OutputPath))
                     {
-                        timing.FinalMoveMilliseconds = ElapsedMilliseconds(
+                        timing.FinalMoveMilliseconds += ElapsedMilliseconds(
                             moveStarted
                         );
                         return false;
@@ -944,9 +976,7 @@ namespace FlockSurveillance
             public CaptureJob(
                 long captureId,
                 Bitmap bitmap,
-                string outputPath,
-                int outputWidth,
-                int outputHeight,
+                List<SurveillancePhotoOutputPlan> outputs,
                 long quality,
                 SurveillancePhotoOverlayMetadata overlayMetadata,
                 SurveillanceJpegCaptureTiming timing
@@ -954,9 +984,7 @@ namespace FlockSurveillance
             {
                 CaptureId = captureId;
                 Bitmap = bitmap;
-                OutputPath = outputPath;
-                OutputWidth = outputWidth;
-                OutputHeight = outputHeight;
+                Outputs = outputs;
                 Quality = quality;
                 OverlayMetadata = overlayMetadata;
                 Timing = timing;
@@ -964,9 +992,7 @@ namespace FlockSurveillance
 
             public long CaptureId { get; }
             public Bitmap Bitmap { get; }
-            public string OutputPath { get; }
-            public int OutputWidth { get; }
-            public int OutputHeight { get; }
+            public List<SurveillancePhotoOutputPlan> Outputs { get; }
             public long Quality { get; }
             public SurveillancePhotoOverlayMetadata OverlayMetadata
             {

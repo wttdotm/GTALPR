@@ -6,6 +6,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
 using GTA.Math;
 
@@ -895,6 +896,30 @@ namespace FlockSurveillance
         public float StreamingRadius { get; }
         public float MinimumLiveDistance { get; }
 
+        public SurveillancePhotoScenePlan TakeFirstViews(int maximumViews)
+        {
+            if (maximumViews <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maximumViews)
+                );
+            }
+
+            if (maximumViews >= Views.Count)
+            {
+                return this;
+            }
+
+            return new SurveillancePhotoScenePlan(
+                ManifestPath,
+                Scene,
+                Views.GetRange(0, maximumViews),
+                Center,
+                StreamingRadius,
+                MinimumLiveDistance
+            );
+        }
+
         public static bool TryCreate(
             string manifestPath,
             string photoRoot,
@@ -953,6 +978,27 @@ namespace FlockSurveillance
             string manifestPath,
             string photoRoot,
             string legacyPhotoRoot,
+            out SurveillancePhotoScenePlan plan,
+            out string error,
+            out SurveillancePhotoScenePlanResult result
+        )
+        {
+            return TryCreate(
+                manifestPath,
+                photoRoot,
+                legacyPhotoRoot,
+                SurveillancePhotoOutputFormats.Original,
+                out plan,
+                out error,
+                out result
+            );
+        }
+
+        internal static bool TryCreate(
+            string manifestPath,
+            string photoRoot,
+            string legacyPhotoRoot,
+            SurveillancePhotoOutputFormats outputFormats,
             out SurveillancePhotoScenePlan plan,
             out string error,
             out SurveillancePhotoScenePlanResult result
@@ -977,6 +1023,7 @@ namespace FlockSurveillance
                 scene,
                 photoRoot,
                 legacyPhotoRoot,
+                outputFormats,
                 out plan,
                 out error,
                 out result
@@ -1013,8 +1060,41 @@ namespace FlockSurveillance
             out SurveillancePhotoScenePlanResult result
         )
         {
+            return TryCreateFromScene(
+                manifestPath,
+                scene,
+                photoRoot,
+                legacyPhotoRoot,
+                SurveillancePhotoOutputFormats.Original,
+                out plan,
+                out error,
+                out result
+            );
+        }
+
+        internal static bool TryCreateFromScene(
+            string manifestPath,
+            SceneSnapshotDto scene,
+            string photoRoot,
+            string legacyPhotoRoot,
+            SurveillancePhotoOutputFormats outputFormats,
+            out SurveillancePhotoScenePlan plan,
+            out string error,
+            out SurveillancePhotoScenePlanResult result
+        )
+        {
             plan = null;
             result = SurveillancePhotoScenePlanResult.Invalid;
+
+            outputFormats = SurveillancePhotoOutputFormatSet.Normalize(
+                outputFormats
+            );
+
+            if (outputFormats == SurveillancePhotoOutputFormats.None)
+            {
+                error = "Select at least one photo aspect ratio.";
+                return false;
+            }
 
             if (scene == null)
             {
@@ -1032,37 +1112,105 @@ namespace FlockSurveillance
                 scene,
                 legacyPhotoRoot
             );
+            List<SurveillancePhotoOutputFormats> selectedFormats =
+                SurveillancePhotoOutputFormatSet.Expand(outputFormats);
 
             for (int index = 0; index < scene.Views.Count; index++)
             {
                 SceneCameraViewDto view = scene.Views[index];
-                string outputPath = expectedOutputPaths[index];
-                string legacyOutputPath = legacyOutputPaths == null
-                    ? null
-                    : legacyOutputPaths[index];
+                bool alreadyRendered = false;
+                List<string> completionOutputPaths =
+                    new List<string>(4);
 
-                if (
-                    !File.Exists(outputPath) &&
-                    (
-                        string.IsNullOrWhiteSpace(legacyOutputPath) ||
-                        !File.Exists(legacyOutputPath)
+                foreach (
+                    SurveillancePhotoOutputFormats knownFormat
+                    in SurveillancePhotoOutputFormatSet.Expand(
+                        SurveillancePhotoOutputFormatSet.All
                     )
                 )
                 {
-                    missingViews.Add(
-                        new SurveillancePhotoViewPlan(
-                            view,
-                            index,
-                            outputPath,
-                            legacyOutputPath
-                        )
+                    string knownPath =
+                        SurveillancePhotoOutputFormatSet.GetOutputPath(
+                            expectedOutputPaths[index],
+                            knownFormat
+                        );
+                    completionOutputPaths.Add(knownPath);
+
+                    if (File.Exists(knownPath))
+                    {
+                        alreadyRendered = true;
+                        break;
+                    }
+                }
+
+                if (
+                    legacyOutputPaths != null &&
+                    !string.IsNullOrWhiteSpace(legacyOutputPaths[index])
+                )
+                {
+                    completionOutputPaths.Add(legacyOutputPaths[index]);
+                    alreadyRendered |= File.Exists(
+                        legacyOutputPaths[index]
                     );
                 }
+
+                if (alreadyRendered)
+                {
+                    continue;
+                }
+
+                List<SurveillancePhotoOutputPlan> outputs =
+                    new List<SurveillancePhotoOutputPlan>();
+
+                foreach (
+                    SurveillancePhotoOutputFormats format
+                    in selectedFormats
+                )
+                {
+                    string outputPath =
+                        SurveillancePhotoOutputFormatSet.GetOutputPath(
+                            expectedOutputPaths[index],
+                            format
+                        );
+                    string legacyOutputPath =
+                        format == SurveillancePhotoOutputFormats.Original &&
+                        legacyOutputPaths != null
+                            ? legacyOutputPaths[index]
+                            : null;
+                    int outputWidth;
+                    int outputHeight;
+                    SurveillancePhotoOutputFormatSet.GetOutputDimensions(
+                        view.OutputWidth,
+                        view.OutputHeight,
+                        format,
+                        out outputWidth,
+                        out outputHeight
+                    );
+                    SurveillancePhotoOutputPlan output =
+                        new SurveillancePhotoOutputPlan(
+                            format,
+                            outputPath,
+                            legacyOutputPath,
+                            outputWidth,
+                            outputHeight
+                        );
+                    outputs.Add(output);
+                }
+
+                missingViews.Add(
+                    new SurveillancePhotoViewPlan(
+                        view,
+                        index,
+                        outputs,
+                        completionOutputPaths
+                    )
+                );
             }
 
             if (missingViews.Count == 0)
             {
-                error = "Every camera view in this scene already has a JPG.";
+                error =
+                    "Every camera view already has a JPG.";
                 result = SurveillancePhotoScenePlanResult.AlreadyRendered;
                 return false;
             }
@@ -1184,30 +1332,46 @@ namespace FlockSurveillance
                 scene,
                 legacyPhotoRoot
             );
+            List<SurveillancePhotoOutputFormats> knownFormats =
+                SurveillancePhotoOutputFormatSet.Expand(
+                    SurveillancePhotoOutputFormatSet.All
+                );
             List<string> completed = new List<string>(expected.Count);
 
             for (int index = 0; index < expected.Count; index++)
             {
-                string canonicalPath = expected[index];
+                string completedPath = null;
 
-                if (File.Exists(canonicalPath))
+                foreach (
+                    SurveillancePhotoOutputFormats format
+                    in knownFormats
+                )
                 {
-                    completed.Add(canonicalPath);
+                    string canonicalPath =
+                        SurveillancePhotoOutputFormatSet.GetOutputPath(
+                            expected[index],
+                            format
+                        );
+
+                    if (File.Exists(canonicalPath))
+                    {
+                        completedPath = canonicalPath;
+                        break;
+                    }
                 }
-                else if (
+
+                if (
+                    completedPath == null &&
                     legacy != null &&
                     File.Exists(legacy[index])
                 )
                 {
-                    completed.Add(legacy[index]);
+                    completedPath = legacy[index];
                 }
-                else
-                {
-                    // The caller only stores this list for a completed scene.
-                    // Keeping the canonical path makes a racing deletion
-                    // invalidate the cache on the next discovery pass.
-                    completed.Add(canonicalPath);
-                }
+
+                // The caller stores this only for a completed scene. The
+                // canonical fallback makes a racing deletion invalidate it.
+                completed.Add(completedPath ?? expected[index]);
             }
 
             return completed;
@@ -1329,6 +1493,14 @@ namespace FlockSurveillance
     /// </summary>
     internal sealed class SurveillancePhotoBatchPlan
     {
+        private static readonly Regex GeneratedManifestNamePattern =
+            new Regex(
+                @"^(?<snapshot>\d{8}T\d{6}\.\d{3}Z-\d{6,}-[0-9a-f]{8})_(?<camera>.+)\.json\.gz$",
+                RegexOptions.Compiled |
+                RegexOptions.CultureInvariant |
+                RegexOptions.IgnoreCase
+            );
+
         private SurveillancePhotoBatchPlan(
             List<SurveillancePhotoScenePlan> scenes,
             int manifestCount,
@@ -1376,6 +1548,51 @@ namespace FlockSurveillance
             );
         }
 
+        public SurveillancePhotoBatchPlan TakeNewestPhotos(
+            int maximumPhotos
+        )
+        {
+            if (maximumPhotos <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maximumPhotos)
+                );
+            }
+
+            int remaining = maximumPhotos;
+            List<SurveillancePhotoScenePlan> scenes =
+                new List<SurveillancePhotoScenePlan>();
+
+            foreach (SurveillancePhotoScenePlan scene in Scenes)
+            {
+                if (remaining <= 0)
+                {
+                    break;
+                }
+
+                int selectedViewCount = Math.Min(
+                    remaining,
+                    scene.Views.Count
+                );
+
+                if (selectedViewCount > 0)
+                {
+                    scenes.Add(scene.TakeFirstViews(selectedViewCount));
+                    remaining -= selectedViewCount;
+                }
+            }
+
+            return new SurveillancePhotoBatchPlan(
+                scenes,
+                ManifestCount,
+                InvalidManifestCount,
+                AlreadyRenderedManifestCount,
+                CollidingManifestCount,
+                CollidingViewCount,
+                FirstInvalidManifestError
+            );
+        }
+
         public static bool TryDiscover(
             string sceneDirectory,
             string photoDirectory,
@@ -1385,8 +1602,10 @@ namespace FlockSurveillance
         {
             SurveillancePhotoDiscoveryStatistics ignored;
             return TryDiscover(
-                sceneDirectory,
+                new[] { sceneDirectory },
                 photoDirectory,
+                null,
+                SurveillancePhotoOutputFormats.Original,
                 null,
                 out batch,
                 out error,
@@ -1407,6 +1626,7 @@ namespace FlockSurveillance
                 sceneDirectories,
                 photoDirectory,
                 legacyPhotoDirectory,
+                SurveillancePhotoOutputFormats.Original,
                 null,
                 out batch,
                 out error,
@@ -1427,6 +1647,7 @@ namespace FlockSurveillance
                 new[] { sceneDirectory },
                 photoDirectory,
                 null,
+                SurveillancePhotoOutputFormats.Original,
                 cache,
                 out batch,
                 out error,
@@ -1438,6 +1659,7 @@ namespace FlockSurveillance
             IEnumerable<string> sceneDirectories,
             string photoDirectory,
             string legacyPhotoDirectory,
+            SurveillancePhotoOutputFormats outputFormats,
             SurveillancePhotoDiscoveryCache cache,
             out SurveillancePhotoBatchPlan batch,
             out string error,
@@ -1447,6 +1669,16 @@ namespace FlockSurveillance
             batch = null;
             error = null;
             statistics = new SurveillancePhotoDiscoveryStatistics();
+            outputFormats = SurveillancePhotoOutputFormatSet.Normalize(
+                outputFormats
+            );
+
+            if (outputFormats == SurveillancePhotoOutputFormats.None)
+            {
+                error = "Select at least one photo aspect ratio.";
+                return false;
+            }
+
             List<string> manifestDirectories = NormalizeManifestDirectories(
                 sceneDirectories
             );
@@ -1462,6 +1694,8 @@ namespace FlockSurveillance
             }
 
             List<string> candidates;
+            int manifestCount;
+            int gzipManifestCount;
 
             try
             {
@@ -1473,6 +1707,41 @@ namespace FlockSurveillance
                         StringComparer.OrdinalIgnoreCase
                     )
                     .ToList();
+
+                manifestCount = candidates.Count;
+                gzipManifestCount = candidates.Count(path =>
+                    path.EndsWith(
+                        ".json.gz",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                );
+                HashSet<string> jpegFileNames = GetTopLevelJpegFileNames(
+                    photoDirectory
+                );
+                List<string> pendingCandidates =
+                    new List<string>(candidates.Count);
+
+                foreach (string candidate in candidates)
+                {
+                    // Shipped libraries are flat and recorder-generated
+                    // captures currently pair one gzip with one v01 JPG. An
+                    // exact pair can bypass decompression; every unmatched
+                    // filename still follows the full validation path below.
+                    if (HasCanonicalJpegPair(
+                        candidate,
+                        photoDirectory,
+                        jpegFileNames
+                    ))
+                    {
+                        statistics.FilenameMatchCount++;
+                    }
+                    else
+                    {
+                        pendingCandidates.Add(candidate);
+                    }
+                }
+
+                candidates = pendingCandidates;
             }
             catch (Exception exception)
             {
@@ -1482,15 +1751,10 @@ namespace FlockSurveillance
                 return false;
             }
 
-            statistics.CandidateCount = candidates.Count;
-            statistics.GzipJsonCount = candidates.Count(path =>
-                path.EndsWith(
-                    ".json.gz",
-                    StringComparison.OrdinalIgnoreCase
-                )
-            );
+            statistics.CandidateCount = manifestCount;
+            statistics.GzipJsonCount = gzipManifestCount;
             statistics.PlainJsonCount =
-                candidates.Count - statistics.GzipJsonCount;
+                manifestCount - statistics.GzipJsonCount;
 
             if (cache != null)
             {
@@ -1502,7 +1766,7 @@ namespace FlockSurveillance
                     cache.RetainOnly(activePaths);
             }
 
-            if (candidates.Count == 0)
+            if (manifestCount == 0)
             {
                 error = "No recorded scene manifests were found.";
                 return false;
@@ -1511,7 +1775,7 @@ namespace FlockSurveillance
             List<SurveillancePhotoScenePlan> discovered =
                 new List<SurveillancePhotoScenePlan>();
             int invalidCount = 0;
-            int alreadyRenderedCount = 0;
+            int alreadyRenderedCount = statistics.FilenameMatchCount;
             string firstInvalidError = null;
 
             foreach (string manifestPath in candidates)
@@ -1567,6 +1831,7 @@ namespace FlockSurveillance
                                         snapshot,
                                         photoDirectory,
                                         legacyPhotoDirectory,
+                                        outputFormats,
                                         out scene,
                                         out candidateError,
                                         out result
@@ -1608,6 +1873,7 @@ namespace FlockSurveillance
                                         snapshot,
                                         photoDirectory,
                                         legacyPhotoDirectory,
+                                        outputFormats,
                                         out scene,
                                         out candidateError,
                                         out result
@@ -1678,9 +1944,18 @@ namespace FlockSurveillance
             {
                 foreach (SurveillancePhotoViewPlan view in scene.Views)
                 {
-                    int count;
-                    outputClaimCounts.TryGetValue(view.OutputPath, out count);
-                    outputClaimCounts[view.OutputPath] = count + 1;
+                    foreach (
+                        SurveillancePhotoOutputPlan output
+                        in view.Outputs
+                    )
+                    {
+                        int count;
+                        outputClaimCounts.TryGetValue(
+                            output.OutputPath,
+                            out count
+                        );
+                        outputClaimCounts[output.OutputPath] = count + 1;
+                    }
                 }
             }
 
@@ -1699,7 +1974,9 @@ namespace FlockSurveillance
             {
                 int originalViewCount = scene.Views.Count;
                 scene.Views.RemoveAll(view =>
-                    collidingPaths.Contains(view.OutputPath)
+                    view.Outputs.Any(output =>
+                        collidingPaths.Contains(output.OutputPath)
+                    )
                 );
                 int removed = originalViewCount - scene.Views.Count;
 
@@ -1733,7 +2010,7 @@ namespace FlockSurveillance
 
             batch = new SurveillancePhotoBatchPlan(
                 queue,
-                candidates.Count,
+                manifestCount,
                 invalidCount,
                 alreadyRenderedCount,
                 collidingManifestCount,
@@ -1761,6 +2038,120 @@ namespace FlockSurveillance
             else
             {
                 error = "No unrendered camera views remain.";
+            }
+
+            return false;
+        }
+
+        private static HashSet<string> GetTopLevelJpegFileNames(
+            string photoDirectory
+        )
+        {
+            HashSet<string> names = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase
+            );
+
+            if (
+                string.IsNullOrWhiteSpace(photoDirectory) ||
+                !Directory.Exists(photoDirectory)
+            )
+            {
+                return names;
+            }
+
+            foreach (
+                string path
+                in Directory.EnumerateFiles(
+                    photoDirectory,
+                    "*.jpg",
+                    SearchOption.TopDirectoryOnly
+                )
+            )
+            {
+                names.Add(Path.GetFileName(path));
+            }
+
+            return names;
+        }
+
+        private static bool HasCanonicalJpegPair(
+            string manifestPath,
+            string photoDirectory,
+            ISet<string> jpegFileNames
+        )
+        {
+            if (
+                string.IsNullOrWhiteSpace(manifestPath) ||
+                string.IsNullOrWhiteSpace(photoDirectory) ||
+                jpegFileNames == null ||
+                !manifestPath.EndsWith(
+                    ".json.gz",
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                return false;
+            }
+
+            string manifestDirectory = Path.GetDirectoryName(
+                Path.GetFullPath(manifestPath)
+            );
+            string canonicalDirectory = Path.GetFullPath(photoDirectory)
+                .TrimEnd(
+                    Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar
+                );
+
+            if (!string.Equals(
+                manifestDirectory?.TrimEnd(
+                    Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar
+                ),
+                canonicalDirectory,
+                StringComparison.OrdinalIgnoreCase
+            ))
+            {
+                return false;
+            }
+
+            Match match = GeneratedManifestNamePattern.Match(
+                Path.GetFileName(manifestPath)
+            );
+
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            string expectedJpegName = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}__v01__{1}.jpg",
+                match.Groups["snapshot"].Value,
+                match.Groups["camera"].Value
+            );
+            string expectedOriginalPath = Path.Combine(
+                photoDirectory,
+                expectedJpegName
+            );
+
+            foreach (
+                SurveillancePhotoOutputFormats format
+                in SurveillancePhotoOutputFormatSet.Expand(
+                    SurveillancePhotoOutputFormatSet.All
+                )
+            )
+            {
+                string selectedName = Path.GetFileName(
+                    SurveillancePhotoOutputFormatSet.GetOutputPath(
+                        expectedOriginalPath,
+                        format
+                    )
+                );
+
+                if (jpegFileNames.Contains(selectedName))
+                {
+                    return true;
+                }
             }
 
             return false;
@@ -1821,7 +2212,7 @@ namespace FlockSurveillance
                     in Directory.EnumerateFiles(
                         directory,
                         "*.json*",
-                        SearchOption.AllDirectories
+                        SearchOption.TopDirectoryOnly
                     )
                     .Where(
                         SurveillancePhotoLabManifestReader.IsManifestPath
@@ -1905,40 +2296,73 @@ namespace FlockSurveillance
         public SurveillancePhotoViewPlan(
             SceneCameraViewDto view,
             int originalIndex,
-            string outputPath,
-            string legacyOutputPath = null
+            List<SurveillancePhotoOutputPlan> outputs,
+            List<string> completionOutputPaths
         )
         {
+            if (outputs == null || outputs.Count == 0)
+            {
+                throw new ArgumentException(
+                    "At least one photo output is required.",
+                    nameof(outputs)
+                );
+            }
+
+            if (
+                completionOutputPaths == null ||
+                completionOutputPaths.Count == 0
+            )
+            {
+                throw new ArgumentException(
+                    "At least one completion output path is required.",
+                    nameof(completionOutputPaths)
+                );
+            }
+
             View = view;
             OriginalIndex = originalIndex;
-            OutputPath = outputPath;
-            LegacyOutputPath = legacyOutputPath;
+            Outputs = outputs;
+            CompletionOutputPaths = completionOutputPaths;
         }
 
         public SceneCameraViewDto View { get; }
         public int OriginalIndex { get; }
-        public string OutputPath { get; }
-        public string LegacyOutputPath { get; }
+        public List<SurveillancePhotoOutputPlan> Outputs { get; }
+        public string OutputPath => Outputs[0].OutputPath;
+        private List<string> CompletionOutputPaths { get; }
 
         public bool TryGetExistingOutputPath(out string existingPath)
         {
-            if (File.Exists(OutputPath))
-            {
-                existingPath = OutputPath;
-                return true;
-            }
-
-            if (
-                !string.IsNullOrWhiteSpace(LegacyOutputPath) &&
-                File.Exists(LegacyOutputPath)
-            )
-            {
-                existingPath = LegacyOutputPath;
-                return true;
-            }
-
             existingPath = null;
+
+            foreach (string outputPath in CompletionOutputPaths)
+            {
+                if (File.Exists(outputPath))
+                {
+                    existingPath = outputPath;
+                    return true;
+                }
+            }
+
             return false;
+        }
+
+        public List<SurveillancePhotoOutputPlan> GetMissingOutputs()
+        {
+            List<SurveillancePhotoOutputPlan> missing =
+                new List<SurveillancePhotoOutputPlan>();
+
+            foreach (SurveillancePhotoOutputPlan output in Outputs)
+            {
+                string ignored;
+
+                if (!output.TryGetExistingOutputPath(out ignored))
+                {
+                    missing.Add(output);
+                }
+            }
+
+            return missing;
         }
     }
 }

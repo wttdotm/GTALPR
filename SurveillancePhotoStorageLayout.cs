@@ -81,7 +81,7 @@ namespace FlockSurveillance
         {
             string picturesRoot = ResolvePicturesDirectory();
             return new SurveillancePhotoStorageLayout(
-                Path.Combine(picturesRoot, "FlockSurveillance")
+                Path.Combine(picturesRoot, "GTALPR_Surveillance")
             );
         }
 
@@ -169,7 +169,7 @@ namespace FlockSurveillance
             bool found = false;
             string flockRoot = Path.Combine(
                 picturesRoot,
-                "FlockSurveillance"
+                "GTALPR_Surveillance"
             );
 
             foreach (string leaf in new[] { "Captures", "Scenes" })

@@ -90,7 +90,7 @@ On game startup, GTALPR should report that its camera definitions loaded.
 
 *Photo capture and Photo Lab output are stored under:*
 ```text
-%USERPROFILE%\Pictures\FlockSurveillance\Captures
+%USERPROFILE%\Pictures\GTALPR_Surveillance\Captures
 ```
 
 ## Beta Testing

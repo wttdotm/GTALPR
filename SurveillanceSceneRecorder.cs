@@ -862,10 +862,10 @@ namespace FlockSurveillance
             }
 
             AssignEntityIds(builder, vehicles, peds, props, projectiles);
-            CaptureVehicles(builder, vehicles);
-            CapturePeds(builder, peds);
             CaptureProjectiles(builder, projectiles);
             CaptureProps(builder, props);
+            CaptureVehicles(builder, vehicles);
+            CapturePeds(builder, peds);
         }
 
         private static void RemovePedWeaponObjectProps(
@@ -1305,6 +1305,34 @@ namespace FlockSurveillance
 
             try
             {
+                Projectile projectile = entity as Projectile;
+
+                if (projectile != null)
+                {
+                    return Projectile.FromHandle(projectile.Handle) != null;
+                }
+
+                Prop prop = entity as Prop;
+
+                if (prop != null)
+                {
+                    return prop.Exists();
+                }
+
+                Ped ped = entity as Ped;
+
+                if (ped != null)
+                {
+                    return ped.Exists();
+                }
+
+                Vehicle vehicle = entity as Vehicle;
+
+                if (vehicle != null)
+                {
+                    return vehicle.Exists();
+                }
+
                 return entity.Exists();
             }
             catch
@@ -1482,6 +1510,12 @@ namespace FlockSurveillance
             {
                 Prop prop = candidate.Prop;
 
+                if (!IsUsableEntity(prop))
+                {
+                    builder.Snapshot.CaptureStats.PropsSkipped++;
+                    continue;
+                }
+
                 if (builder.CapturedHandles.Contains(prop.Handle))
                 {
                     continue;
@@ -1517,6 +1551,12 @@ namespace FlockSurveillance
         {
             foreach (Projectile projectile in projectiles)
             {
+                if (!IsUsableEntity(projectile))
+                {
+                    builder.Snapshot.CaptureStats.ProjectilesSkipped++;
+                    continue;
+                }
+
                 if (builder.CapturedHandles.Contains(projectile.Handle))
                 {
                     continue;
@@ -1759,6 +1799,7 @@ namespace FlockSurveillance
             }
 
             Entity attachedEntity = null;
+            bool isPropLike = entity is Prop;
 
             try
             {
@@ -1771,31 +1812,41 @@ namespace FlockSurveillance
 
             int interiorId = 0;
             int roomKey = 0;
-            EntityPopulationType populationType = entity.PopulationType;
+            bool isPersistent = entity.IsPersistent;
+            EntityPopulationType populationType = isPropLike
+                ? (
+                    isPersistent
+                        ? EntityPopulationType.Mission
+                        : EntityPopulationType.Unknown
+                )
+                : entity.PopulationType;
             Vector3 position = entity.Position;
             Vector3 rotation = entity.Rotation;
             Quaternion quaternion = entity.Quaternion;
             Vector3 velocity = entity.Velocity;
             Vector3 rotationVelocity = entity.RotationVelocity;
 
-            try
+            if (!isPropLike)
             {
-                interiorId = Function.Call<int>(
-                    Hash.GET_INTERIOR_FROM_ENTITY,
-                    entity.Handle
-                );
-                roomKey = Function.Call<int>(
-                    Hash.GET_ROOM_KEY_FROM_ENTITY,
-                    entity.Handle
-                );
-            }
-            catch (Exception exception)
-            {
-                AddWarning(
-                    builder,
-                    "Could not read interior data for entity " +
-                        entity.Handle + ": " + exception.Message
-                );
+                try
+                {
+                    interiorId = Function.Call<int>(
+                        Hash.GET_INTERIOR_FROM_ENTITY,
+                        entity.Handle
+                    );
+                    roomKey = Function.Call<int>(
+                        Hash.GET_ROOM_KEY_FROM_ENTITY,
+                        entity.Handle
+                    );
+                }
+                catch (Exception exception)
+                {
+                    AddWarning(
+                        builder,
+                        "Could not read interior data for entity " +
+                            entity.Handle + ": " + exception.Message
+                    );
+                }
             }
 
             return new SceneCommonEntityDto
@@ -1818,7 +1869,7 @@ namespace FlockSurveillance
                 IsAlive = entity.IsAlive,
                 IsVisible = entity.IsVisible,
                 Opacity = entity.Opacity,
-                IsPersistent = entity.IsPersistent,
+                IsPersistent = isPersistent,
                 IsPositionFrozen = entity.IsPositionFrozen,
                 HasGravity = entity.HasGravity,
                 IsCollisionEnabled = entity.IsCollisionEnabled,

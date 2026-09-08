@@ -3,8 +3,8 @@
 Checks every saved Flock surveillance scene manifest.
 
 .DESCRIPTION
-Auto-discovers the flat FlockSurveillance\Captures directory and the legacy
-FlockSurveillance\Scenes directory under the Windows Pictures folder,
+Auto-discovers the flat GTALPR_Surveillance\Captures directory and the legacy
+GTALPR_Surveillance\Scenes directory under the Windows Pictures folder,
 including OneDrive redirection. Validates JSON structure, entity references,
 capture counters, completeness metadata, and performance.
 
@@ -217,7 +217,7 @@ function Add-CandidateRoot {
     }
 
     $expanded = [Environment]::ExpandEnvironmentVariables($PicturesPath)
-    $root = Join-Path $expanded "FlockSurveillance"
+    $root = Join-Path $expanded "GTALPR_Surveillance"
 
     foreach ($existing in $Candidates) {
         if ([string]::Equals(

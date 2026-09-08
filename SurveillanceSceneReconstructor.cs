@@ -16,6 +16,7 @@ namespace FlockSurveillance
     {
         private const int ModelRequestsPerTick = 24;
         private const int MaximumWarnings = 100;
+        private const float DestroyedCameraFragmentRadius = 10f;
         private static readonly TimeSpan ModelLoadTimeout =
             TimeSpan.FromSeconds(20);
 
@@ -38,6 +39,13 @@ namespace FlockSurveillance
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private readonly HashSet<string> _duplicateHeldWeaponPropIds =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        private readonly HashSet<string>
+            _destructionFragmentSiblingPropIds =
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        private readonly HashSet<string> _requiredDestructionPropIds =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private readonly List<ScenePropDto> _propsToClone =
@@ -81,12 +89,16 @@ namespace FlockSurveillance
                 throw new ArgumentNullException(nameof(scene));
             }
 
+            IEnumerable<SceneCameraViewDto> renderViews =
+                pendingViews ?? scene.Views;
+
             _selection = SurveillanceSceneEntitySelection.Create(
                 scene,
-                pendingViews,
+                renderViews,
                 useFrustum
             );
 
+            IndexDestructionFragmentSiblingProps(scene.Views);
             IndexDuplicateHeldWeaponProps();
             IndexSceneEntities();
             BuildCloneAndModelPlan();
@@ -456,8 +468,16 @@ namespace FlockSurveillance
             {
                 if (
                     prop?.Entity != null &&
-                    _duplicateHeldWeaponPropIds.Contains(
+                    !_requiredDestructionPropIds.Contains(
                         prop.Entity.EntityId
+                    ) &&
+                    (
+                        _duplicateHeldWeaponPropIds.Contains(
+                            prop.Entity.EntityId
+                        ) ||
+                        _destructionFragmentSiblingPropIds.Contains(
+                            prop.Entity.EntityId
+                        )
                     )
                 )
                 {
@@ -562,6 +582,118 @@ namespace FlockSurveillance
                 )
                 {
                     _duplicateHeldWeaponPropIds.Add(common.EntityId);
+                }
+            }
+        }
+
+        private void IndexDestructionFragmentSiblingProps(
+            IEnumerable<SceneCameraViewDto> views
+        )
+        {
+            if (views == null)
+            {
+                return;
+            }
+
+            foreach (SceneCameraViewDto view in views)
+            {
+                string requiredId =
+                    view?.CameraDestruction?.DestroyedPropId;
+
+                if (!string.IsNullOrWhiteSpace(requiredId))
+                {
+                    _requiredDestructionPropIds.Add(requiredId);
+                }
+            }
+
+            if (_requiredDestructionPropIds.Count == 0)
+            {
+                return;
+            }
+
+            List<ScenePropDto> requiredProps =
+                new List<ScenePropDto>();
+
+            foreach (ScenePropDto prop in _selection.Props)
+            {
+                if (
+                    prop?.Entity != null &&
+                    _requiredDestructionPropIds.Contains(
+                        prop.Entity.EntityId
+                    )
+                )
+                {
+                    requiredProps.Add(prop);
+                }
+            }
+
+            foreach (ScenePropDto candidate in _selection.Props)
+            {
+                SceneCommonEntityDto entity = candidate?.Entity;
+
+                if (
+                    entity == null ||
+                    _requiredDestructionPropIds.Contains(
+                        entity.EntityId
+                    ) ||
+                    entity.PopulationTypeValue != 0 ||
+                    !string.Equals(
+                        entity.PopulationType,
+                        "Unknown",
+                        StringComparison.OrdinalIgnoreCase
+                    ) ||
+                    entity.IsPersistent ||
+                    entity.IsPositionFrozen ||
+                    candidate.IsStatic ||
+                    candidate.IsPickupObject ||
+                    !candidate.IsFragmentObject ||
+                    !string.IsNullOrWhiteSpace(
+                        entity.AttachedToEntityId
+                    ) ||
+                    (
+                        entity.Attachment != null &&
+                        !string.IsNullOrWhiteSpace(
+                            entity.Attachment.ParentEntityId
+                        )
+                    ) ||
+                    !string.Equals(
+                        candidate.ReconstructionPolicy,
+                        "SpawnClone",
+                        StringComparison.OrdinalIgnoreCase
+                    ) ||
+                    !IsFinite(entity.Position)
+                )
+                {
+                    continue;
+                }
+
+                foreach (ScenePropDto requiredProp in requiredProps)
+                {
+                    SceneCommonEntityDto required =
+                        requiredProp?.Entity;
+
+                    if (
+                        required == null ||
+                        !requiredProp.IsFragmentObject ||
+                        required.ModelHash == 0 ||
+                        required.ModelHash != entity.ModelHash ||
+                        !IsFinite(required.Position)
+                    )
+                    {
+                        continue;
+                    }
+
+                    if (
+                        ToVector(entity.Position).DistanceTo(
+                            ToVector(required.Position)
+                        ) <= DestroyedCameraFragmentRadius
+                    )
+                    {
+                        _destructionFragmentSiblingPropIds.Add(
+                            entity.EntityId
+                        );
+                        break;
+                    }
                 }
             }
         }

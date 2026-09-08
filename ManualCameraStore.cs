@@ -11,7 +11,7 @@ namespace FlockSurveillance
 
         public string osmType { get; set; }
 
-        public long osmId { get; set; }
+        public string osmId { get; set; }
 
         public float X { get; set; }
 
@@ -44,7 +44,7 @@ namespace FlockSurveillance
 
             CameraPath = Path.Combine(
                 root,
-                "FlockSurveillance",
+                "GTALPR_Surveillance",
                 "manual_cameras.json"
             );
         }

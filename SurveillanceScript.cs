@@ -56,9 +56,14 @@ namespace FlockSurveillance
             new SurveillancePhotoLab();
 
         private const float CameraActivationDistanceMeters = 150f;
+        private const string RenderAllTitle = "Render All";
         private const string StartRenderHelpText =
             "Press B or Esc to cancel at anytime. Progress will " +
             "continue where it left off.";
+        private const string RenderLastHelpText =
+            "Use left/right to choose how many newest unrendered " +
+            "photos to render, then press Enter or A. " +
+            StartRenderHelpText;
         private int _nextCameraStreamingCheck;
 
 
@@ -80,6 +85,9 @@ namespace FlockSurveillance
         private const float CameraPropHeadingOffsetDegrees = 245f;
         private const float CameraModelRotationAdjustmentDegrees =
             24f; //for flockfragment
+
+        private readonly FlockPileSpawner _flockPileSpawner =
+            new FlockPileSpawner(CameraPropModel);
 
         // private const string CameraPropModel = "flock_camera_v3";
 
@@ -162,10 +170,30 @@ namespace FlockSurveillance
         private readonly LearnMorePopup _learnMorePopup =
             new LearnMorePopup();
 
+        private readonly LearnMorePopup _disclaimerPopup =
+            new LearnMorePopup(
+                "DISCLAIMER",
+                new KeyValuePair<string, string>(
+                    "Is this mod endorsed by or affiliated with Flock or Rockstar Games?",
+                    "Obviously not. GTALPR is in no way affiliated with either " +
+                    "company. Neither the Flock logo nor the Grand Theft Auto " +
+                    "logo are subject to the license of this mod, and both are " +
+                    "properties of their respective companies. The mechanics " +
+                    "and gameplay of GTALPR are not an endorsement of the " +
+                    "activities players may perform with the mod. Destroying " +
+                    "Flock cameras in real life is illegal and will not, in " +
+                    "fact, give you a loot box with $600."
+                ),
+                new KeyValuePair<string, string>(
+                    "Did your lawyer tell you to write that slide?",
+                    "We compromised."
+                )
+            );
+
         private readonly NativeMenu _controlPanelMenu =
             new NativeMenu(
                 "GTALPR",
-                "CONTROL PANEL"
+                "By WTTDOTM"
             );
 
         private readonly NativeCheckboxItem _showFovDebugItem =
@@ -187,6 +215,14 @@ namespace FlockSurveillance
                 "Camera Network Enabled",
                 "Controls detection, reports, sounds, photo recording, and blip pulsing. Physical cameras remain present.",
                 true
+            );
+
+        private readonly NativeSliderItem _misreportFrequencyItem =
+            new NativeSliderItem(
+                "Misreport Frequency: 5%",
+                "Chance that an innocent camera sighting triggers a false police report.",
+                100,
+                5
             );
 
         private readonly NativeItem _placeManualCameraItem =
@@ -225,6 +261,12 @@ namespace FlockSurveillance
                 "Sean Kennedy @aie_sean"
             );
 
+        private readonly NativeItem _disclaimerItem =
+            new NativeItem(
+                "Disclaimer",
+                "Read the GTALPR disclaimer."
+            );
+
         //stats stuff
         private readonly SurveillanceStatsStore _statsStore =
             new SurveillanceStatsStore();
@@ -235,7 +277,7 @@ namespace FlockSurveillance
 
         private readonly NativeMenu _statsMenu =
             new NativeMenu(
-                "FLOCK SURVEILLANCE",
+                "GTALPR",
                 "STATISTICS"
             );
 
@@ -275,11 +317,15 @@ namespace FlockSurveillance
 
         // Photo menu stuff
         private const double EstimatedPhotosPerMinute = 12d;
+        private const int MaximumRenderLastPhotoCount = 50;
+        private const int DefaultRenderLastPhotoCount = 10;
         private const float MinimumCctvStrength = 0.5f;
         private const float CctvStrengthStep = 0.05f;
 
         private bool _capturePhotosEnabled = true;
         private bool _captureDestructionPhotosEnabled = true;
+        private bool _leftShiftWasDown;
+        private bool _updatingPhotoAspectRatioItems;
         // Photo sharing is intentionally disabled for the beta.
         // private bool _sharePhotosOptIn;
         private bool _photoMetricsRefreshQueued;
@@ -318,7 +364,7 @@ namespace FlockSurveillance
 
         private readonly NativeMenu _photosMenu =
             new NativeMenu(
-                "FLOCK SURVEILLANCE",
+                "GTALPR",
                 "PHOTOS"
             )
             {
@@ -389,12 +435,46 @@ namespace FlockSurveillance
 
         private readonly NativeItem _startRenderItem =
             new NativeItem(
-                "Start Render",
+                RenderAllTitle,
                 StartRenderHelpText
             )
             {
                 Enabled = false
             };
+
+        private readonly NativeSliderItem _renderLastItem =
+            new NativeSliderItem(
+                "Render Last " + DefaultRenderLastPhotoCount,
+                RenderLastHelpText,
+                MaximumRenderLastPhotoCount - 1,
+                DefaultRenderLastPhotoCount - 1
+            )
+            {
+                Enabled = false
+            };
+
+        private readonly NativeCheckboxItem _originalAspectRatioItem =
+            new NativeCheckboxItem(
+                "Original",
+                "Save the original gameplay aspect ratio.",
+                true
+            );
+
+        private readonly NativeCheckboxItem _vertical4x5AspectRatioItem =
+            new NativeCheckboxItem(
+                "Vertical 4:5 (Post)",
+                "Save a centered, full-height portrait copy with the " +
+                "__4x5.jpg filename suffix.",
+                false
+            );
+
+        private readonly NativeCheckboxItem _vertical9x16AspectRatioItem =
+            new NativeCheckboxItem(
+                "Vertical 9:16 (Story)",
+                "Save a centered, full-height portrait copy with the " +
+                "__9x16.jpg filename suffix.",
+                true
+            );
 
         // private readonly NativeCheckboxItem _sharePhotosItem =
         //     new NativeCheckboxItem(
@@ -426,6 +506,36 @@ namespace FlockSurveillance
 
             _controlPanelMenu.BannerText.Color =
                 Color.White;
+
+            _statsMenu.Banner =
+                new LemonUI.Elements.ScaledRectangle(
+                    PointF.Empty,
+                    new SizeF(0f, 108f)
+                )
+                {
+                    Color = Color.Black
+                };
+
+            _statsMenu.BannerText.Font =
+                GTA.UI.Font.Pricedown;
+
+            _statsMenu.BannerText.Color =
+                Color.White;
+
+            _photosMenu.Banner =
+                new LemonUI.Elements.ScaledRectangle(
+                    PointF.Empty,
+                    new SizeF(0f, 108f)
+                )
+                {
+                    Color = Color.Black
+                };
+
+            _photosMenu.BannerText.Font =
+                GTA.UI.Font.Pricedown;
+
+            _photosMenu.BannerText.Color =
+                Color.White;
             Tick += OnTick;
             KeyDown += OnKeyDown;
 
@@ -436,6 +546,9 @@ namespace FlockSurveillance
 
             _cameraNetworkItem.CheckboxChanged +=
                 OnCameraNetworkChanged;
+
+            _misreportFrequencyItem.ValueChanged +=
+                OnMisreportFrequencyChanged;
 
             _placeManualCameraItem.Activated +=
                 OnPlaceManualCameraActivated;
@@ -463,6 +576,7 @@ namespace FlockSurveillance
             _controlPanelMenu.Add(_showFovDebugItem);
             _controlPanelMenu.Add(_showLineOfSightItem);
             _controlPanelMenu.Add(_cameraNetworkItem);
+            _controlPanelMenu.Add(_misreportFrequencyItem);
 
             _controlPanelPool.Add(_controlPanelMenu);
 
@@ -505,11 +619,30 @@ namespace FlockSurveillance
             _startRenderItem.Activated +=
                 OnStartRenderActivated;
 
+            _renderLastItem.ValueChanged +=
+                OnRenderLastValueChanged;
+
+            _renderLastItem.Activated +=
+                OnRenderLastActivated;
+
+            _originalAspectRatioItem.CheckboxChanged +=
+                OnPhotoAspectRatioChanged;
+
+            _vertical4x5AspectRatioItem.CheckboxChanged +=
+                OnPhotoAspectRatioChanged;
+
+            _vertical9x16AspectRatioItem.CheckboxChanged +=
+                OnPhotoAspectRatioChanged;
+
             Color renderReadyColor = Color.FromArgb(10, 190, 81);
             _startRenderItem.Colors.TitleNormal = renderReadyColor;
             _startRenderItem.Colors.TitleHovered = renderReadyColor;
             _startRenderItem.Colors.AltTitleNormal = renderReadyColor;
             _startRenderItem.Colors.AltTitleHovered = renderReadyColor;
+            _renderLastItem.Colors.TitleNormal = renderReadyColor;
+            _renderLastItem.Colors.TitleHovered = renderReadyColor;
+            _renderLastItem.Colors.AltTitleNormal = renderReadyColor;
+            _renderLastItem.Colors.AltTitleHovered = renderReadyColor;
 
             // _sharePhotosItem.CheckboxChanged +=
             //     OnSharePhotosChanged;
@@ -526,6 +659,14 @@ namespace FlockSurveillance
             _photosMenu.Add(_queuedPhotosItem);
             _photosMenu.Add(_estimatedQueueTimeItem);
             _photosMenu.Add(_startRenderItem);
+            _photosMenu.Add(_renderLastItem);
+
+            _photosMenu.Add(
+                new NativeSeparatorItem("ASPECT RATIOS")
+            );
+            _photosMenu.Add(_originalAspectRatioItem);
+            _photosMenu.Add(_vertical4x5AspectRatioItem);
+            _photosMenu.Add(_vertical9x16AspectRatioItem);
 
             _photosMenu.Add(
                 new NativeSeparatorItem("RENDERING")
@@ -543,6 +684,7 @@ namespace FlockSurveillance
                 new NativeSeparatorItem("INFORMATION")
             );
             _photosMenu.Add(_photoInformationItem);
+            UpdatePhotoInformationDescription(null);
 
             _controlPanelMenu.AddSubMenu(
                 _photosMenu,
@@ -562,9 +704,22 @@ namespace FlockSurveillance
                 (sender, e) =>
                     _controlPanelMenu.Visible = true;
 
+            _disclaimerItem.Activated +=
+                (sender, e) =>
+                {
+                    _controlPanelPool.HideAll();
+                    _disclaimerPopup.Open();
+                };
+
+            _disclaimerPopup.Closed +=
+                (sender, e) =>
+                    _controlPanelMenu.Visible = true;
+
             _controlPanelMenu.Add(_learnMoreItem);
             _controlPanelMenu.Add(_creditsItem);
+            _controlPanelMenu.Add(_disclaimerItem);
             _controlPanelPool.Add(_learnMorePopup);
+            _controlPanelPool.Add(_disclaimerPopup);
 
             _photoLab.CctvEffectEnabled =
                 _cctvShaderItem.Checked;
@@ -592,6 +747,24 @@ namespace FlockSurveillance
         }
         private void OnTick(object sender, EventArgs e)
         {
+            bool leftShiftDown =
+                Game.IsKeyPressed(Keys.ShiftKey);
+
+            bool manualPhotoRequested =
+                leftShiftDown &&
+                !_leftShiftWasDown;
+
+            _leftShiftWasDown = leftShiftDown;
+
+            manualPhotoRequested =
+                manualPhotoRequested ||
+                (
+                    Game.LastInputMethod == InputMethod.GamePad &&
+                    Game.IsControlJustPressed(
+                        GtaControl.FrontendRight
+                    )
+                );
+
             _sceneRecorder.Tick();
 
             if (
@@ -609,7 +782,7 @@ namespace FlockSurveillance
             if (recordedDestructionCaptures > 0)
             {
                 // Any discovery result created before this snapshot reaches
-                // disk is stale. Keep Start Render disabled until the writer
+                // disk is stale. Keep rendering disabled until the writer
                 // finishes and a fresh background scan includes the scene.
                 _refreshPhotoMetricsAfterSceneWrites = true;
                 _photoMetricsRequestedGeneration++;
@@ -678,7 +851,13 @@ namespace FlockSurveillance
                 AutoLootDistanceMeters
             );
 
-            DrawNearbyCameraFieldsOfView();
+            DrawNearbyCameraFieldsOfView(
+                manualPhotoRequested &&
+                !Game.IsPaused &&
+                !_controlPanelPool.AreAnyVisible &&
+                _cameraNetworkEnabled &&
+                _capturePhotosEnabled
+            );
             UpdateCameraAudio();
         }
 
@@ -1078,6 +1257,7 @@ namespace FlockSurveillance
             DeleteCameraProp();
             DeleteActiveCameras();
             DeleteLootDrops();
+            _flockPileSpawner.Dispose();
         }
 
 
@@ -1325,7 +1505,7 @@ namespace FlockSurveillance
                         Guid.NewGuid().ToString("N"),
 
                     osmType = "manual",
-                    osmId = 0L,
+                    osmId = "0",
 
                     X = placementPosition.X,
                     Y = placementPosition.Y,
@@ -1805,7 +1985,9 @@ namespace FlockSurveillance
                 (CameraBlipPulseAmount * pulse);
         }
 
-        private void DrawNearbyCameraFieldsOfView()
+        private void DrawNearbyCameraFieldsOfView(
+            bool manualPhotoRequested
+        )
         {
             Vehicle playerVehicle =
                 Game.Player.Character.CurrentVehicle;
@@ -1815,6 +1997,7 @@ namespace FlockSurveillance
                 playerVehicle.Exists();
 
             bool sightingReportedThisTick = false;
+            bool manualPhotoTaken = false;
 
             foreach (
                 ActiveCamera camera
@@ -1922,6 +2105,10 @@ namespace FlockSurveillance
                     !camera.WasSeeingPlayer &&
                     sightingCooldownElapsed;
 
+                bool manualPhoto =
+                    manualPhotoRequested &&
+                    cameraCanSeePlayer;
+
                 camera.WasSeeingPlayer =
                     cameraCanSeePlayer;
 
@@ -1930,26 +2117,37 @@ namespace FlockSurveillance
 
                 // Every sighting takes a picture, even when the player
                 // is innocent and no false positive occurs.
-                if (isNewSighting)
+                if (
+                    isNewSighting ||
+                    manualPhoto
+                )
                 {
                     PlayPictureTakenSound();
 
                     if (_capturePhotosEnabled)
                     {
-                        _sceneRecorder.TryRecordSighting(
-                            camera.Definition.FlockCameraId,
-                            camera.Position +
-                                new Vector3(
-                                    0f,
-                                    0f,
-                                    CameraEyeHeightMeters
-                                ),
-                            camera.Definition.Heading,
-                            CameraFovDegrees,
-                            CameraRangeMeters
-                        );
-                    }
+                        bool photoQueued =
+                            _sceneRecorder.TryRecordSighting(
+                                camera.Definition.FlockCameraId,
+                                camera.Position +
+                                    new Vector3(
+                                        0f,
+                                        0f,
+                                        CameraEyeHeightMeters
+                                    ),
+                                camera.Definition.Heading,
+                                CameraFovDegrees,
+                                CameraRangeMeters
+                            );
 
+                        manualPhotoTaken =
+                            manualPhotoTaken ||
+                            (manualPhoto && photoQueued);
+                    }
+                }
+
+                if (isNewSighting)
+                {
                     _stats.TotalCameraSightings++;
                     SaveStats();
                 }
@@ -1957,7 +2155,8 @@ namespace FlockSurveillance
                 if (
                     isNewSighting &&
                     Game.Player.WantedLevel == 0 &&
-                    _random.NextDouble() < 0.05
+                    _random.NextDouble() <
+                        (_misreportFrequencyItem.Value / 100d)
                 )
                 {
                     Game.Player.WantedLevel =
@@ -1999,6 +2198,13 @@ namespace FlockSurveillance
 
                 camera.WasReportableSighting =
                     reportableSighting;
+            }
+
+            if (manualPhotoTaken)
+            {
+                GTA.UI.Notification.Show(
+                    "~g~Manual photo taken!"
+                );
             }
         }
 
@@ -2343,8 +2549,44 @@ namespace FlockSurveillance
                         camera.Definition.Heading
                 };
 
+            double previousFastestThree =
+                _stats.FastestThreeCamerasSeconds;
+
+            double previousFastestTen =
+                _stats.FastestTenCamerasSeconds;
+
+            double previousFastestFifty =
+                _stats.FastestFiftyCamerasSeconds;
+
+            double previousFastestAll =
+                _stats.FastestAllCamerasSeconds;
+
             _stats.RecordCameraDestruction(
                 destructionEvent
+            );
+
+            ShowNewDestructionRecordNotification(
+                "3 Camera",
+                previousFastestThree,
+                _stats.FastestThreeCamerasSeconds
+            );
+
+            ShowNewDestructionRecordNotification(
+                "10 Camera",
+                previousFastestTen,
+                _stats.FastestTenCamerasSeconds
+            );
+
+            ShowNewDestructionRecordNotification(
+                "50 Camera",
+                previousFastestFifty,
+                _stats.FastestFiftyCamerasSeconds
+            );
+
+            ShowNewDestructionRecordNotification(
+                "All cameras",
+                previousFastestAll,
+                _stats.FastestAllCamerasSeconds
             );
 
             SaveStats();
@@ -2609,11 +2851,11 @@ namespace FlockSurveillance
 
                 GTA.UI.Notification.Show(
                     "~g~Collected Flock camera hardware~s~\n" +
-                    "+1 Open-Q 624A SOM\n" +
-                    "+1 RC7611 LTE Modem\n" +
-                    "+1 IMX477 Camera Assembly\n" +
-                    "+1 GNSS/RF Antenna Set\n" +
-                    "+1 205Wh Li-ion Battery\n" +
+                    "+1 Processing Unit\n" +
+                    "+1 Network Connector\n" +
+                    "+1 Camera\n" +
+                    "+1 GPS Antenna\n" +
+                    "+1 Battery\n" +
                     $"~g~+${cameraSalvageValue:N0}"
                 );
 
@@ -3003,6 +3245,16 @@ namespace FlockSurveillance
             }
         }
 
+        private void OnMisreportFrequencyChanged(
+            object sender,
+            EventArgs e
+        )
+        {
+            _misreportFrequencyItem.Title =
+                "Misreport Frequency: " +
+                _misreportFrequencyItem.Value + "%";
+        }
+
         private void ResetCameraDetectionState()
         {
             _wasSeeingPlayer = false;
@@ -3087,7 +3339,7 @@ namespace FlockSurveillance
                         Guid.NewGuid().ToString("N"),
 
                     osmType = "manual",
-                    osmId = 0L,
+                    osmId = "0",
                     X = position.X,
                     Y = position.Y,
                     Heading =
@@ -3438,6 +3690,44 @@ namespace FlockSurveillance
                 _stats.TotalCameraSightings.ToString("N0");
         }
 
+        private static void ShowNewDestructionRecordNotification(
+            string recordName,
+            double previousSeconds,
+            double currentSeconds
+        )
+        {
+            if (
+                currentSeconds <= 0d ||
+                (
+                    previousSeconds > 0d &&
+                    currentSeconds >= previousSeconds
+                )
+            )
+            {
+                return;
+            }
+
+            GTA.UI.Notification.Show(
+                $"New fastest {recordName} destruction time! " +
+                FormatNotificationRecordTime(currentSeconds)
+            );
+        }
+
+        private static string FormatNotificationRecordTime(
+            double seconds
+        )
+        {
+            TimeSpan time = TimeSpan.FromSeconds(seconds);
+
+            return string.Format(
+                "{0:00}:{1:00}:{2:00}.{3:00}",
+                (int)time.TotalHours,
+                time.Minutes,
+                time.Seconds,
+                time.Milliseconds / 10
+            );
+        }
+
         private static string FormatRecordTime(
             double seconds
         )
@@ -3520,6 +3810,36 @@ namespace FlockSurveillance
             }
         }
 
+        private void OnSpawnFlockPileActivated(
+            object sender,
+            EventArgs e
+        )
+        {
+            _controlPanelPool.HideAll();
+            ReleaseControlPanelPause();
+
+            int spawnedCount;
+            string error;
+
+            if (_flockPileSpawner.TrySpawn(
+                Game.Player.Character,
+                out spawnedCount,
+                out error
+            ))
+            {
+                GTA.UI.Notification.Show(
+                    "~g~Spawned " + spawnedCount +
+                    " Flockfragments."
+                );
+                return;
+            }
+
+            GTA.UI.Notification.Show(
+                (spawnedCount > 0 ? "~y~" : "~r~") +
+                "Flock pile~s~: " + error
+            );
+        }
+
         private void OnCctvShaderChanged(
             object sender,
             EventArgs e
@@ -3527,6 +3847,72 @@ namespace FlockSurveillance
         {
             _photoLab.CctvEffectEnabled =
                 _cctvShaderItem.Checked;
+        }
+
+        private void OnPhotoAspectRatioChanged(
+            object sender,
+            EventArgs e
+        )
+        {
+            if (_updatingPhotoAspectRatioItems)
+            {
+                return;
+            }
+
+            SurveillancePhotoOutputFormats selected =
+                SelectedPhotoOutputFormats;
+
+            if (selected == SurveillancePhotoOutputFormats.None)
+            {
+                NativeCheckboxItem changed =
+                    sender as NativeCheckboxItem;
+
+                if (changed != null)
+                {
+                    _updatingPhotoAspectRatioItems = true;
+                    changed.Checked = true;
+                    _updatingPhotoAspectRatioItems = false;
+                }
+
+                GTA.UI.Notification.Show(
+                    "~y~Photo Lab~s~: Keep at least one aspect ratio " +
+                    "selected."
+                );
+                return;
+            }
+
+            _photoLab.OutputFormats = selected;
+            _readyPhotoBatch = null;
+            _photoDiscoveryReady = false;
+            RequestPhotoMetricsRefresh(true);
+        }
+
+        private SurveillancePhotoOutputFormats SelectedPhotoOutputFormats
+        {
+            get
+            {
+                SurveillancePhotoOutputFormats selected =
+                    SurveillancePhotoOutputFormats.None;
+
+                if (_originalAspectRatioItem.Checked)
+                {
+                    selected |= SurveillancePhotoOutputFormats.Original;
+                }
+
+                if (_vertical4x5AspectRatioItem.Checked)
+                {
+                    selected |=
+                        SurveillancePhotoOutputFormats.Vertical4x5;
+                }
+
+                if (_vertical9x16AspectRatioItem.Checked)
+                {
+                    selected |=
+                        SurveillancePhotoOutputFormats.Vertical9x16;
+                }
+
+                return selected;
+            }
         }
 
         private void OnFrustumEntityLoadingChanged(
@@ -3568,6 +3954,31 @@ namespace FlockSurveillance
             EventArgs e
         )
         {
+            StartPhotoRendering(0);
+        }
+
+        private void OnRenderLastValueChanged(
+            object sender,
+            EventArgs e
+        )
+        {
+            _renderLastItem.Title =
+                "Render Last " + SelectedRenderLastPhotoCount;
+        }
+
+        private void OnRenderLastActivated(
+            object sender,
+            EventArgs e
+        )
+        {
+            StartPhotoRendering(SelectedRenderLastPhotoCount);
+        }
+
+        private int SelectedRenderLastPhotoCount =>
+            _renderLastItem.Value + 1;
+
+        private void StartPhotoRendering(int maximumPhotoCount)
+        {
             long requestedTimestamp =
                 SurveillancePhotoLabTelemetry.GetTimestamp();
 
@@ -3588,12 +3999,17 @@ namespace FlockSurveillance
 
             _controlPanelPool.HideAll();
             ReleaseControlPanelPause();
-            TogglePhotoQueueRendering(requestedTimestamp, false);
+            TogglePhotoQueueRendering(
+                requestedTimestamp,
+                false,
+                maximumPhotoCount
+            );
         }
 
         private void TogglePhotoQueueRendering(
             long requestedTimestamp = 0L,
-            bool startWhenDiscoveryReady = false
+            bool startWhenDiscoveryReady = false,
+            int maximumPhotoCount = 0
         )
         {
             if (_photoLab.IsBusy)
@@ -3633,7 +4049,9 @@ namespace FlockSurveillance
                 return;
             }
 
-            SurveillancePhotoBatchPlan batch = _readyPhotoBatch;
+            SurveillancePhotoBatchPlan batch = maximumPhotoCount > 0
+                ? _readyPhotoBatch.TakeNewestPhotos(maximumPhotoCount)
+                : _readyPhotoBatch;
             _startRenderWhenDiscoveryReady = false;
             _queuedRenderRequestTimestamp = 0L;
 
@@ -3653,8 +4071,10 @@ namespace FlockSurveillance
             _readyPhotoBatch = null;
             _photoDiscoveryReady = false;
             _startRenderItem.Enabled = false;
-            _startRenderItem.Title = "Start Render";
+            _startRenderItem.Title = RenderAllTitle;
             _startRenderItem.Description = StartRenderHelpText;
+            _renderLastItem.Enabled = false;
+            _renderLastItem.Description = RenderLastHelpText;
         }
 
         // private void OnSharePhotosChanged(
@@ -3721,6 +4141,10 @@ namespace FlockSurveillance
             _startRenderItem.Description =
                 "Checking new and changed scene manifests in the " +
                 "background.";
+            _renderLastItem.Enabled = false;
+            _renderLastItem.Description =
+                "Checking new and changed scene manifests in the " +
+                "background.";
             _queuedPhotosItem.AltTitle = "...";
             _estimatedQueueTimeItem.AltTitle = "...";
             _estimatedQueueTimeItem.Description =
@@ -3744,6 +4168,8 @@ namespace FlockSurveillance
                 _photoMetricsRequestTimestamp;
             int generation = _photoMetricsTaskGeneration;
             long requestTimestamp = _photoMetricsTaskRequestTimestamp;
+            SurveillancePhotoOutputFormats outputFormats =
+                SelectedPhotoOutputFormats;
 
             _photoMetricsTask = Task.Run(
                 () =>
@@ -3760,6 +4186,7 @@ namespace FlockSurveillance
                     bool succeeded =
                         _photoLab.TryGetLibraryMetrics(
                             _photoDiscoveryCache,
+                            outputFormats,
                             out batch,
                             out discoveryStatistics,
                             out generatedPhotoCount,
@@ -3892,10 +4319,13 @@ namespace FlockSurveillance
                 _readyPhotoBatch = null;
                 _photoDiscoveryReady = false;
                 _startRenderItem.Enabled = false;
-                _startRenderItem.Title = "Start Render";
+                _startRenderItem.Title = RenderAllTitle;
                 _startRenderItem.Description =
                     result?.Error ??
                     "Photo queue information is temporarily unavailable.";
+                _renderLastItem.Enabled = false;
+                _renderLastItem.Description =
+                    _startRenderItem.Description;
                 _estimatedQueueTimeItem.Description =
                     result?.Error ??
                     "Photo queue information is temporarily unavailable.";
@@ -3910,9 +4340,13 @@ namespace FlockSurveillance
                 result.PendingPhotoCount > 0;
 
             _startRenderItem.Enabled = _photoDiscoveryReady;
-            _startRenderItem.Title = "Start Render";
+            _startRenderItem.Title = RenderAllTitle;
             _startRenderItem.Description = _photoDiscoveryReady
                 ? StartRenderHelpText
+                : "No unrendered captures are currently waiting.";
+            _renderLastItem.Enabled = _photoDiscoveryReady;
+            _renderLastItem.Description = _photoDiscoveryReady
+                ? RenderLastHelpText
                 : "No unrendered captures are currently waiting.";
 
             _generatedPhotosItem.AltTitle =
@@ -3941,16 +4375,27 @@ namespace FlockSurveillance
             _queuedPhotosItem.AltTitle =
                 result.PendingPhotoCount.ToString("N0");
 
+            UpdatePhotoInformationDescription(
+                result.CaptureFolderBytes
+            );
+        }
+
+        private void UpdatePhotoInformationDescription(
+            long? captureFolderBytes
+        )
+        {
             _photoInformationItem.Description =
-                "- Scene files and photos are stored at " +
-                _photoLab.PhotoDirectory +
-                "~n~- Render telemetry is stored at " +
-                _photoLab.TelemetryDirectory +
-                "~n~- Photo rendering can be interrupted and " +
-                "continued whenever, so the queue can be completed in batches." +
-                "~n~- Current capture folder size: " +
-                FormatFileSize(
-                    result.CaptureFolderBytes
+                "- Captures: " + _photoLab.PhotoDirectory +
+                "~n~- Telemetry: " + _photoLab.TelemetryDirectory +
+                "~n~- To re-render photos in new aspect ratios, move or " +
+                "delete the current photo in the " +
+                "GTALPR_Surveillance/Captures directory." +
+                "~n~- Rendering can resume in batches." +
+                "~n~- Capture size: " +
+                (
+                    captureFolderBytes.HasValue
+                        ? FormatFileSize(captureFolderBytes.Value)
+                        : "Calculating..."
                 );
         }
 
@@ -4022,6 +4467,9 @@ namespace FlockSurveillance
             {
                 if (
                     definition != null &&
+                    !_manualCameraDefinitions.Contains(
+                        definition
+                    ) &&
                     !string.IsNullOrWhiteSpace(
                         definition.FlockCameraId
                     )
