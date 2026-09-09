@@ -390,6 +390,16 @@ namespace FlockSurveillance
                 ItemCount = CountVisibility.Never
             };
 
+        private readonly NativeMenu _photoGuideMenu =
+            new NativeMenu(
+                "GTALPR",
+                "PHOTO GUIDE",
+                "Information and troubleshooting for saved photos."
+            )
+            {
+                ItemCount = CountVisibility.Never
+            };
+
         private readonly NativeCheckboxItem _capturePhotosItem =
             new NativeCheckboxItem(
                 "Capture Photos",
@@ -407,11 +417,11 @@ namespace FlockSurveillance
                 true
             );
 
-        private readonly NativeItem _generatedPhotosItem =
+        private readonly NativeItem _queuedAndGeneratedPhotosItem =
             new NativeItem(
-                "Photos Generated",
-                "Number of saved JPG files in the capture library.",
-                "0"
+                "Pics Queued & Generated",
+                "Photos waiting to render, followed by saved JPGs.",
+                "0 & 0"
             );
 
         private readonly NativeItem _estimatedQueueTimeItem =
@@ -443,13 +453,6 @@ namespace FlockSurveillance
                 "Adjust the saved JPG CCTV treatment strength.",
                 30,
                 3
-            );
-
-        private readonly NativeItem _queuedPhotosItem =
-            new NativeItem(
-                "Photos Queued",
-                "Number of photos currently waiting to be rendered.",
-                "0"
             );
 
         private readonly NativeItem _startRenderItem =
@@ -501,13 +504,6 @@ namespace FlockSurveillance
         //         "Consent preference only; sharing will be wired later.",
         //         false
         //     );
-
-        private readonly NativeItem _photoInformationItem =
-            new NativeItem(
-                "Photo Information",
-                "Photo storage information."
-            );
-
 
         public SurveillanceScript()
         {
@@ -569,6 +565,21 @@ namespace FlockSurveillance
                 GTA.UI.Font.Pricedown;
 
             _photosMenu.BannerText.Color =
+                Color.White;
+
+            _photoGuideMenu.Banner =
+                new LemonUI.Elements.ScaledRectangle(
+                    PointF.Empty,
+                    new SizeF(0f, 108f)
+                )
+                {
+                    Color = Color.Black
+                };
+
+            _photoGuideMenu.BannerText.Font =
+                GTA.UI.Font.Pricedown;
+
+            _photoGuideMenu.BannerText.Color =
                 Color.White;
             Tick += OnTick;
             KeyDown += OnKeyDown;
@@ -706,12 +717,91 @@ namespace FlockSurveillance
                 OnPhotosMenuOpening;
 
             _photosMenu.Add(
+                new NativeSeparatorItem("HOW TO SAVE PICS")
+            );
+            _photosMenu.AddSubMenu(
+                _photoGuideMenu,
+                "OPEN"
+            );
+
+            _photoGuideMenu.Add(
+                new NativeSeparatorItem("INFORMATION")
+            );
+            _photoGuideMenu.Add(
+                new NativeItem(
+                    "Pictures Folder",
+                    "Captures live in your default Pictures folder."
+                )
+            );
+            _photoGuideMenu.Add(
+                new NativeItem(
+                    "Exit Rendering Early",
+                    "Press B or Esc to save progress and exit rendering early."
+                )
+            );
+            _photoGuideMenu.Add(
+                new NativeItem(
+                    "New Aspect Ratios",
+                    "To re-render with new aspect ratios, remove the existing " +
+                    "image file(s) from your Captures folder."
+                )
+            );
+            _photoGuideMenu.Add(
+                new NativeItem(
+                    "Render Last X",
+                    "Use Render Last X to render only a few captures."
+                )
+            );
+            _photoGuideMenu.Add(
+                new NativeItem(
+                    "CCTV Effect",
+                    "Change the amount of CCTV effect with the CCTV Strength " +
+                    "slider."
+                )
+            );
+            _photoGuideMenu.Add(
+                new NativeSeparatorItem("TROUBLESHOOTING")
+            );
+            _photoGuideMenu.Add(
+                new NativeItem(
+                    "No Cinematic Mode",
+                    "Ensure you are not in cinematic mode. Press R on " +
+                    "keyboard or B on controller."
+                )
+            );
+            _photoGuideMenu.Add(
+                new NativeItem(
+                    "Animations & Cutscenes",
+                    "Make sure you are not in a unique animation or cutscene."
+                )
+            );
+            _photoGuideMenu.Add(
+                new NativeItem(
+                    "Nearby Captures",
+                    "Photos within about 200 ft of your current location will " +
+                    "not render."
+                )
+            );
+            _photoGuideMenu.Add(
+                new NativeItem(
+                    "Temporary Errors",
+                    "If there is an error, try again in a few minutes or after " +
+                    "restarting the game."
+                )
+            );
+            _photoGuideMenu.Add(
+                new NativeItem(
+                    "Persistent Errors",
+                    "If errors persist, try using windowed mode."
+                )
+            );
+
+            _photosMenu.Add(
                 new NativeSeparatorItem("CAPTURE")
             );
             _photosMenu.Add(_capturePhotosItem);
             _photosMenu.Add(_captureDestructionPhotosItem);
-            _photosMenu.Add(_generatedPhotosItem);
-            _photosMenu.Add(_queuedPhotosItem);
+            _photosMenu.Add(_queuedAndGeneratedPhotosItem);
             _photosMenu.Add(_estimatedQueueTimeItem);
             _photosMenu.Add(_startRenderItem);
             _photosMenu.Add(_renderLastItem);
@@ -735,18 +825,13 @@ namespace FlockSurveillance
             // );
             // _photosMenu.Add(_sharePhotosItem);
 
-            _photosMenu.Add(
-                new NativeSeparatorItem("INFORMATION")
-            );
-            _photosMenu.Add(_photoInformationItem);
-            UpdatePhotoInformationDescription(null);
-
             _controlPanelMenu.AddSubMenu(
                 _photosMenu,
                 "OPEN"
             );
 
             _controlPanelPool.Add(_photosMenu);
+            _controlPanelPool.Add(_photoGuideMenu);
 
             _learnMoreItem.Activated +=
                 (sender, e) =>
@@ -4226,7 +4311,7 @@ namespace FlockSurveillance
             _renderLastItem.Description =
                 "Checking new and changed scene manifests in the " +
                 "background.";
-            _queuedPhotosItem.AltTitle = "...";
+            _queuedAndGeneratedPhotosItem.AltTitle = "... & ...";
             _estimatedQueueTimeItem.AltTitle = "...";
             _estimatedQueueTimeItem.Description =
                 "Scanning the photo library in the background...";
@@ -4430,9 +4515,6 @@ namespace FlockSurveillance
                 ? RenderLastHelpText
                 : "No unrendered captures are currently waiting.";
 
-            _generatedPhotosItem.AltTitle =
-                result.GeneratedPhotoCount.ToString("N0");
-
             double estimatedMinutes =
                 result.PendingPhotoCount /
                 EstimatedPhotosPerMinute;
@@ -4453,31 +4535,11 @@ namespace FlockSurveillance
                 ) +
                 " waiting, estimated at 12 photos per minute.";
 
-            _queuedPhotosItem.AltTitle =
-                result.PendingPhotoCount.ToString("N0");
+            _queuedAndGeneratedPhotosItem.AltTitle =
+                result.PendingPhotoCount.ToString("N0") +
+                " & " +
+                result.GeneratedPhotoCount.ToString("N0");
 
-            UpdatePhotoInformationDescription(
-                result.CaptureFolderBytes
-            );
-        }
-
-        private void UpdatePhotoInformationDescription(
-            long? captureFolderBytes
-        )
-        {
-            _photoInformationItem.Description =
-                "- Captures: " + _photoLab.PhotoDirectory +
-                "~n~- Telemetry: " + _photoLab.TelemetryDirectory +
-                "~n~- To re-render photos in new aspect ratios, move or " +
-                "delete the current photo in the " +
-                "GTALPR_Surveillance/Captures directory." +
-                "~n~- Rendering can resume in batches." +
-                "~n~- Capture size: " +
-                (
-                    captureFolderBytes.HasValue
-                        ? FormatFileSize(captureFolderBytes.Value)
-                        : "Calculating..."
-                );
         }
 
         private static string FormatEstimatedMinutes(
