@@ -76,6 +76,40 @@
                 min-width: 100%;
             }
         }
+
+        @media (max-width: 768px) {
+            * {
+                box-sizing: border-box;
+                min-width: 0;
+                max-width: 100%;
+            }
+
+            body {
+                width: auto;
+                margin: 0;
+                overflow-wrap: anywhere;
+            }
+
+            .textArea {
+                padding: 8px;
+            }
+
+            img,
+            video {
+                height: auto;
+            }
+
+            table {
+                min-width: 700px;
+                max-width: none;
+                overflow-wrap: normal;
+            }
+
+            th,
+            td {
+                word-break: normal;
+            }
+        }
     </style>
 </head>
 
