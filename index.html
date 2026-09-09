@@ -25,6 +25,16 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon/icon-192x192.png">
     <style type="text/css">
+        table {
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            border: 1px solid #888;
+            padding: 8px;
+        }
+
         body {
             align-items: start;
         }
@@ -75,14 +85,21 @@
         <h2>Grand Theft Automated License Plate Reader</h2>
         <div class="projectHeader">
             <div class="projectHeaderText">
-                <p><i>GTA V Mod <br />
+                <p><i>GTA V Mod<br />
                         C#<br />
-                        2026</i></p>
+                        2026</i>
+                    <br /><b><a href="https://github.com/wttdotm/gtalpr/releases" target="_blank">Download
+                            Here</a></b>
+                    <br /><b><a
+                            href="https://docs.google.com/forms/d/e/1FAIpQLSdKzW_IXJk2OFq9ncx7oHUvNiwbVEVKNOZ-ApNU_1VuMkBeKA/viewform"
+                            target="_blank">Submit Cool Photos
+                            Here</a></b>
+                </p>
             </div>
             <img onclick="window.open('https://trafficcamphotobooth.com', '_blank')" class="projectHeaderImage"
-                src="./assets/red_cops.jpg" />
+                src="./assets/rocket_launcher.png" />
         </div>
-        <p>Grant Theft Automated License Plate Reader is a GTA V mod that installs 235 Flock Automated License Plate
+        <p>Grand Theft Automated License Plate Reader is a GTA V mod that installs 235 Flock Automated License Plate
             Reader
             cameras
             (ALPRs) around the in-game map of Los Santos. This number is 1/10th the amount of Flock ALPRS currently
@@ -122,6 +139,91 @@
                 fastest time to destroy 10, 50, or all cameras.</li>
         </ol>
         </p>
+        <br />
+        <h4>Controls</h4>
+        <ul>
+            <li>Open/close the control panel: <strong>F7</strong> or <strong>RB + D-pad Up</strong> while stopped.</li>
+            <li>Place a camera manually with the control panel. You can also save the cameras you place so they'll
+                persist
+                between sessions.</li>
+            <li>Render and save the pictures the cameras have taken of you (and of you destroying cameras) in the
+                <strong>PHOTOS</strong> section of the control panel.
+            </li>
+            <li>See and reset stats in the <strong>STATS</strong> section of the control panel.</li>
+            <li>Manually trigger a photo from all cameras whose FOV you are in by pressing <strong>Left Shift</strong>
+                or
+                <strong>D-pad Right</strong> while in a vehicle.
+            </li>
+        </ul>
+        <br />
+
+        <h4>Settings &amp; Defaults</h4>
+        <p>Most of the features of the mod are toggleable in settings. Here are some of the most important ones and
+            their
+            default states:</p>
+
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th scope="col">Setting</th>
+                        <th scope="col">Description</th>
+                        <th scope="col">Location</th>
+                        <th scope="col">Default</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <th scope="row">Cameras Network Enabled</th>
+                        <td>Turns all cameras and related functionality on/off (basically a total on/off switch).</td>
+                        <td>Main Menu</td>
+                        <td>On</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Show FOV Debug Geometry</th>
+                        <td>Shows a basic wireframe FOV for every camera. Useful for seeing them coming and knowing
+                            their range.
+                        </td>
+                        <td>Main Menu</td>
+                        <td>Off</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Show Line of Sight</th>
+                        <td>When within a camera's FOV, shows a line of sight from the camera to the player. Useful for
+                            seeing
+                            the camera.</td>
+                        <td>Main Menu</td>
+                        <td>On</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Capture Photos</th>
+                        <td>Captures photos for rendering whenever you drive into a camera's line of sight.</td>
+                        <td>Photos</td>
+                        <td>On</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Camera Destruction Cam</th>
+                        <td>Captures photos for rendering whenever you destroy a camera (within a reasonable distance).
+                        </td>
+                        <td>Photos</td>
+                        <td>On</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Aspect Ratios</th>
+                        <td>Different aspect ratios that the photo captures get cropped to (original, 4:5, 9:16).</td>
+                        <td>Photos</td>
+                        <td>Original, 9:16</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">CCTV Filter</th>
+                        <td>Two settings that affect whether a CCTV filter is applied to the photos and how strong it
+                            is.</td>
+                        <td>Photos</td>
+                        <td>On, 0.65</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
         <br />
         <h4>Download</h4>
         <p>You can download the mod from the <a href="https://github.com/wttdotm/gtalpr/releases" target="_blank">GitHub

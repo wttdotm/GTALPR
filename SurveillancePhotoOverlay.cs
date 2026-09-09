@@ -115,6 +115,20 @@ namespace FlockSurveillance
             SceneCameraViewDto view
         )
         {
+            try
+            {
+                string playerName = Game.Player.Name;
+
+                if (!string.IsNullOrWhiteSpace(playerName))
+                {
+                    return playerName.Trim();
+                }
+            }
+            catch
+            {
+                // Fall back to the recorded player character below.
+            }
+
             if (scene.Peds == null ||
                 string.IsNullOrWhiteSpace(view.TargetPedId))
             {

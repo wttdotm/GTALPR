@@ -305,6 +305,25 @@ namespace FlockSurveillance
         private readonly NativeItem _cameraSightingsStat =
             new NativeItem("Camera Sightings");
 
+        private readonly NativeMenu _resetAllTimeStatsMenu =
+            new NativeMenu(
+                "GTALPR",
+                "RESET ALL-TIME STATS",
+                "This permanently erases every saved statistic."
+            );
+
+        private readonly NativeItem _cancelResetAllTimeStatsItem =
+            new NativeItem(
+                "Cancel",
+                "Return without changing any statistics."
+            );
+
+        private readonly NativeItem _confirmResetAllTimeStatsItem =
+            new NativeItem(
+                "Confirm Reset",
+                "Permanently erase every saved statistic and record."
+            );
+
         private readonly string _statsSessionId =
             Guid.NewGuid().ToString("N");
 
@@ -522,6 +541,21 @@ namespace FlockSurveillance
             _statsMenu.BannerText.Color =
                 Color.White;
 
+            _resetAllTimeStatsMenu.Banner =
+                new LemonUI.Elements.ScaledRectangle(
+                    PointF.Empty,
+                    new SizeF(0f, 108f)
+                )
+                {
+                    Color = Color.Black
+                };
+
+            _resetAllTimeStatsMenu.BannerText.Font =
+                GTA.UI.Font.Pricedown;
+
+            _resetAllTimeStatsMenu.BannerText.Color =
+                Color.White;
+
             _photosMenu.Banner =
                 new LemonUI.Elements.ScaledRectangle(
                     PointF.Empty,
@@ -593,6 +627,26 @@ namespace FlockSurveillance
             _statsMenu.Add(_policeReportsStat);
             _statsMenu.Add(_falseReportsStat);
             _statsMenu.Add(_cameraSightingsStat);
+            _statsMenu.Add(
+                new NativeSeparatorItem("ACTIONS")
+            );
+            _statsMenu.AddSubMenu(
+                _resetAllTimeStatsMenu,
+                "OPEN"
+            );
+
+            _resetAllTimeStatsMenu.Add(
+                _cancelResetAllTimeStatsItem
+            );
+            _resetAllTimeStatsMenu.Add(
+                _confirmResetAllTimeStatsItem
+            );
+
+            _cancelResetAllTimeStatsItem.Activated +=
+                (sender, e) => _resetAllTimeStatsMenu.Back();
+
+            _confirmResetAllTimeStatsItem.Activated +=
+                OnConfirmResetAllTimeStatsActivated;
 
             _controlPanelMenu.AddSubMenu(
                 _statsMenu,
@@ -600,6 +654,7 @@ namespace FlockSurveillance
             );
 
             _controlPanelPool.Add(_statsMenu);
+            _controlPanelPool.Add(_resetAllTimeStatsMenu);
 
             _capturePhotosItem.CheckboxChanged +=
                 OnCapturePhotosChanged;
@@ -3655,6 +3710,32 @@ namespace FlockSurveillance
 
 
         //Stats stuff
+        private void OnConfirmResetAllTimeStatsActivated(
+            object sender,
+            EventArgs e
+        )
+        {
+            SurveillanceStatsData resetStats =
+                new SurveillanceStatsData();
+
+            if (!_statsStore.Save(resetStats))
+            {
+                GTA.UI.Notification.Show(
+                    "~r~All-time statistics could not be reset."
+                );
+                return;
+            }
+
+            _stats = resetStats;
+            _statsSaveErrorShown = false;
+            RefreshStatsMenu();
+            _resetAllTimeStatsMenu.Back();
+
+            GTA.UI.Notification.Show(
+                "~g~All-time statistics reset."
+            );
+        }
+
         private void RefreshStatsMenu()
         {
             _totalDestroyedStat.AltTitle =
